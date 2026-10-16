@@ -1,0 +1,235 @@
+# testsuite configuration -- what to test, against whom, for how long.
+#
+# All paths are relative to the repository root.  Edit this file rather than
+# passing flags for anything you want to keep.
+
+[paths]
+results = "testsuite/results"
+suites  = "testsuite/suites"
+
+[defaults]
+# Used by match / gauntlet / elo unless --tc says otherwise.  Short controls
+# give many games per hour; long controls give a rating closer to the one the
+# bot plays at on lichess.  "10+0.1" is 10 seconds plus 100 ms per move.
+time_control = "30+2"
+# How many games to run at the same time.  Keep concurrency * Threads at or
+# below the number of physical cores, or the engines slow each other down and
+# the rating comes out too low.
+concurrency = 4
+# Grace, in milliseconds, before a slow move counts as losing on time.  This
+# covers pipe and scheduler latency, which a real tournament manager also
+# allows for.
+move_overhead_ms = 120
+
+# --------------------------------------------------------------- the engine
+# The engine under test.  Any UCI engine works; this is the one from engine/.
+[engine]
+name    = "ce"
+command = "engine/ce.exe"
+# ce.exe spells these commands `perft N` and `bench N`.  Most other engines
+# want "go perft"; Stockfish needs "bench 16 1" so that the depth lands in the
+# right argument slot.
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 1024, Threads = 6, EvalMode = "hce" }
+
+# ---------------------------------------------------------------- the referee
+# A strong engine used only by tools/make_suites.py to generate and verify the
+# EPD files.  It never plays rated games.
+[referee]
+name    = "referee"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+perft_command = "go perft"
+bench_command = "bench 16 1"
+options = { Threads = 4, Hash = 1024 }
+
+# -------------------------------------------------------------- the opponents
+# A ladder of Stockfish strengths.  `elo` is the rating the Elo fit assumes
+# for that opponent; with UCI_LimitStrength these are Stockfish's own UCI_Elo
+# numbers, so the resulting rating is on Stockfish's scale.  Override `elo` if
+# you want to anchor the ladder to a rating list you trust more.
+#
+# Move Overhead is raised a little because these engines are driven over a
+# pipe by Python, not by a C++ tournament manager.
+
+[[opponent]]
+name = "sf-1320"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1320
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1320 }
+
+[[opponent]]
+name = "sf-1400"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1400
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1400 }
+
+[[opponent]]
+name = "sf-1500"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1500
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1500 }
+
+[[opponent]]
+name = "sf-1600"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1600
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1600 }
+
+[[opponent]]
+name = "sf-1700"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1700
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1700 }
+
+[[opponent]]
+name = "sf-1800"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1800
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1800 }
+
+[[opponent]]
+name = "sf-1900"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 1900
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1900 }
+
+[[opponent]]
+name = "sf-2000"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2000
+options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2000 }
+
+[[opponent]]
+name = "sf-2100"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2100
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2100 }
+
+[[opponent]]
+name = "sf-2200"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2200
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2200 }
+
+[[opponent]]
+name = "sf-2300"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2300
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2300 }
+
+[[opponent]]
+name = "sf-2400"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2400
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2400 }
+
+[[opponent]]
+name = "sf-2500"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2500
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2500 }
+
+[[opponent]]
+name = "sf-2550"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2550
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2550 }
+
+[[opponent]]
+name = "sf-2600"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2600
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2600 }
+
+[[opponent]]
+name = "sf-2650"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2650
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2650 }
+
+[[opponent]]
+name = "sf-2700"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2700
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2700 }
+
+[[opponent]]
+name = "sf-2750"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2750
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2750 }
+
+[[opponent]]
+name = "sf-2800"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2800
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2800 }
+
+[[opponent]]
+name = "sf-2850"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2850
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2850 }
+
+[[opponent]]
+name = "sf-2900"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2900
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2900 }
+
+[[opponent]]
+name = "sf-2950"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2950
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2950 }
+
+[[opponent]]
+name = "sf-3000"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3000
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3000 }
+
+[[opponent]]
+name = "sf-3050"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3050
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3050 }
+
+[[opponent]]
+name = "sf-3100"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3100
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3100 }
+
+[[opponent]]
+name = "sf-3150"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3150
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3150 }
+
+[[opponent]]
+name = "sf-3190"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3190
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3190 }
+
+# Full strength, one thread.  No `elo` on purpose: nobody knows what a single
+# Stockfish 18 thread at 10+0.1 is worth on the UCI_Elo scale, and a guess
+# would poison the fit.  Add `elo = ...` yourself if you want it counted.
+[[opponent]]
+name = "sf-full"
+command = "stockfish/stockfish-windows-x86-64-universal.exe"
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50 }
+note = "unrated: full strength, excluded from the Elo fit"
+
+# ----------------------------------------------------------- when to stop a game
+[adjudication]
+max_plies      = 400   # a game longer than this is called a draw
+draw_enabled   = true
+draw_plies     = 10    # this many consecutive plies inside draw_score
+draw_score     = 8     # centipawns
+draw_after_ply = 100    # never adjudicate a draw before this ply
+resign_enabled = true
+resign_plies   = 6     # this many consecutive moves below resign_score
+resign_score   = 900   # centipawns, from the losing engine's own point of view

@@ -1,0 +1,58 @@
+# tactics: positions where the referee engine finds one clearly best
+# move at depth 18 (MultiPV, at least 120 cp ahead of the
+# rest).  Regenerate or extend with:
+#   python testsuite/tools/make_suites.py tactics --games N
+rnbqkb1r/p3pppp/1p6/2ppP3/3N4/2P5/PPP1QPPP/R1B1KB1R w KQkq - 0 1; bm e6; id "tactics.001";
+2r3k1/pppR1pp1/4p3/4P1P1/5P2/1P4K1/P1P5/8 w - - 0 1; bm g6; id "tactics.002";
+3rr1k1/pp3pp1/1qn2np1/8/3p4/PP1R1P2/2P1NQPP/R1B3K1 b - - 0 1; bm Ne5; id "tactics.003";
+r3r1k1/ppqb1ppp/8/4p1NQ/8/2P5/PP3PPP/R3R1K1 b - - 0 1; bm Bf5; id "tactics.004";
+3rr3/2pq2pk/p2p1pnp/8/2QBPP2/1P6/P5PP/4RRK1 b - - 0 1; bm Rxe4; id "tactics.005";
+r2q2k1/p2nrpp1/3Npn1p/1p6/1P1Pb3/P4NPP/1Q2PPB1/2R1K2R w K - 0 20; bm Nxe4; id "tactics.006";
+r2q2k1/4rpp1/1Qn1pn1p/P7/3P4/P1N2bPP/4PPB1/2R1K2R w K - 0 26; bm Bxf3; id "tactics.007";
+r1bqk2r/ppp1bppp/4pn2/8/2Pn4/4P1P1/PP1P1PBP/RNBQ1RK1 w kq - 0 8; bm exd4; id "tactics.008";
+r3r1k1/ppp2p2/3q1p2/2bN1b1p/4p3/1P4PP/P1QP1PB1/1R3RK1 w - - 2 20; bm Nxf6+; id "tactics.009";
+r3r1k1/ppp2p2/3b1p2/5b1p/4pq2/1PN4P/P1QP2B1/1R4RK w - - 0 24; bm Bxe4+; id "tactics.010";
+2rq2k1/p1r4p/6pP/1pBb1p2/4pP1R/8/PQn1KNP1/2R2B2 w - - 0 30; bm Rxc2; id "tactics.011";
+2r5/5k1p/4q2P/pp3p2/3Q1P1p/P2RB3/6P1/3K4 w - - 7 44; bm Qg7+; id "tactics.012";
+3r3k/5pp1/2b1nq1p/Npn1p2P/P3P1P1/2R1NP2/1PB3K1/3Q4 w - - 1 46; bm Qe1; id "tactics.013";
+3r3k/5pp1/2b2q1p/Npnnp2P/P3P1P1/2R2P2/1PB5/3Q1K2 w - - 0 48; bm exd5; id "tactics.014";
+7k/1N3pp1/5q1p/1pRrp2P/P7/5P1b/1PB1Q3/5K2 w - - 1 52; bm Kg1; id "tactics.015";
+7k/1N3pp1/7p/Pp2p2P/3r4/2R2P1b/1qB2Q2/4K3 w - - 0 56; bm Rd3; id "tactics.016";
+r5k1/1p1bbppp/4p3/nP1P4/8/2P2PP1/P1N1Q2P/2KR1Bq1 w - - 1 22; bm Nd4; id "tactics.017";
+5k2/1p1bbPpp/8/nP6/3N4/4rPP1/PK2Q2P/3R1Bq1 w - - 1 26; bm Qc2; id "tactics.018";
+5k2/1p2bPpp/8/nP5r/3N4/5PPb/P6P/1K1Q4 w - - 0 30; bm g4; id "tactics.019";
+5k2/6pp/1n6/1P6/5PP1/8/PbK4P/8 w - - 0 44; bm Kxb2; id "tactics.020";
+8/4kP1p/6p1/1P4P1/1K2n3/8/7P/8 w - - 1 54; bm b6; id "tactics.021";
+r1b1k2r/1pqnpp1p/2p3p1/P5Pn/N4P2/1N2P3/1bP1B2P/R2QKR2 w Qkq - 0 18; bm Nxb2; id "tactics.022";
+r3r1k1/4p2p/1Pp3p1/2n3P1/4P2P/4N3/2P1bR2/R3K3 w Q - 0 30; bm Rxa8; id "tactics.023";
+7k/5n2/2p3pP/4p3/2P3NP/r6K/5R2/8 w - - 7 48; bm Kg2 Kh2; id "tactics.024";
+6k1/Q4pp1/P3pq2/4n3/1r4Pr/1PR4p/5P1P/2R4K w - - 1 35; bm f3; id "tactics.025";
+2R4r/Q4ppk/P3pq2/4n3/1r4P1/1P3P1p/7P/2R4K w - - 3 37; bm Rxh8+; id "tactics.026";
+4r2n/P4ppk/4pq2/8/5PP1/1P2Q2p/7P/2R4K w - - 1 41; bm Qxh3+; id "tactics.027";
+4Q3/P4ppk/q7/5p2/6Pn/1P5p/7P/5R1K w - - 1 45; bm Rc1; id "tactics.028";
+r1bqkb1r/1p3p1p/p1np1p2/1N2p3/4P3/2N5/PPP2PPP/R2QKB1R w KQkq - 0 9; bm Na3; id "tactics.029";
+1rbqkbr1/1p3p1p/p1np4/3Np3/2N1p3/3Q4/PPP2PPP/R3KB1R w KQ - 0 13; bm Qxe4; id "tactics.030";
+1k1r4/1q6/p2b3p/2p2pp1/2Q5/1NN1r2P/PP3PP1/2R3K1 w - - 0 30; bm fxe3; id "tactics.031";
+rnbq1rk1/pp3ppp/4pn2/2pp4/3P1b1P/P1N1PN2/1PP2PP1/R2QKB1R w KQ - 0 8; bm exf4; id "tactics.032";
+r2r2k1/1p1n1pbp/2p3p1/4P3/Ppb2N2/3BB2P/1PPK2P1/R4R2 w - - 3 21; bm Bxc4; id "tactics.033";
+r2r2k1/1p3pbp/2p3p1/8/Ppn2N2/3BB2P/1PPK2P1/R4R2 w - - 2 23; bm Ke2; id "tactics.034";
+4r3/6kp/2p3p1/1p2rp2/6RP/2nB1KP1/2P1N3/4R3 w - - 0 45; bm Rb4 Rf4 Rd4; id "tactics.035";
+4R3/5r1p/6pk/1p6/2p4P/3B4/2P3NK/1r6 w - - 0 61; bm Be2 Be4; id "tactics.036";
+8/6kp/8/3B1p1P/1pp4N/8/2P4K/3r4 w - - 2 67; bm Nxf5+ Bxc4; id "tactics.037";
+8/7p/8/3N3P/6k1/1p6/2P3BK/4r3 w - - 0 73; bm cxb3 Bh3+; id "tactics.038";
+q1r1nbk1/1bR2pp1/4p2p/p2pB3/Np1P3P/1P1BP1P1/P1Q2P2/6K1 w - - 12 28; bm Rxc8 Nb6 Bh7+; id "tactics.039";
+2b1nbk1/6p1/4p1Bp/p2pp2P/Np1P4/1P2P1P1/P4P2/6K1 w - - 0 32; bm Bxe8; id "tactics.040";
+8/1Nk3p1/4p1Bp/1b1p3P/1p3PP1/1Pb1PK2/P7/8 w - - 3 48; bm Nc5; id "tactics.041";
+6k1/3bn1p1/p3pp2/P2pP2p/1p1N3P/6N1/1P1K1PP1/7r w - - 0 26; bm Nxh1; id "tactics.042";
+2k5/2p2n2/1p5p/p5p1/3P2P1/2P3B1/P3rK2/8 w - - 0 34; bm Kxe2; id "tactics.043";
+8/8/3n3p/1p1k2p1/pB1P2P1/P2K4/8/8 w - - 4 42; bm Kc2; id "tactics.044";
+B2R4/5ppk/4b3/1rp2q2/6p1/2Q1P1K1/6PP/8 w - - 1 40; bm Qd3; id "tactics.045";
+r3k2r/p1p2ppp/4p3/Np1p4/Q1PP4/2P5/P3PqPP/R2K1n1R w kq - 0 14; bm Qxb5+; id "tactics.046";
+r4k1r/p1p2p1p/2Q1p1p1/N2p4/2PP4/2P5/P3PqPP/R2K1n1R w - - 0 16; bm Qxa8+; id "tactics.047";
+1r6/5pkp/6p1/rqPp4/3P4/2Q4P/P5P1/K1R5 w - - 0 34; bm Qd2; id "tactics.048";
+r1bq1rn1/1pp1bpk1/p1np3p/4p3/P1B1P1p1/2PP1NB1/1P3PPP/R2QRNK1 w - - 0 14; bm N3d2; id "tactics.049";
+r2r2k1/1pp1qp1p/6p1/pP1n4/P1Bbp3/4P2P/2P1QPP1/R4RK1 w - - 0 22; bm exd4; id "tactics.050";
+8/5pk1/1p3bp1/p1q5/P1P1B1QP/4PP2/3r4/5K2 w - - 1 40; bm Bxg6; id "tactics.051";
+r2qkb1r/p4pp1/4pP2/1p4p1/4P1b1/2N5/PP3PPP/R3KB1R w KQkq - 0 14; bm Bxb5+; id "tactics.052";
+r3kb1r/p4pp1/4pP2/1q4p1/4P1b1/2N5/PP3PPP/1R2K2R w Kkq - 0 16; bm Nxb5; id "tactics.053";
+2r1qrk1/1p3npp/p3p3/1bp2p2/1B1Pn3/1P2PNPP/P4PB1/RQ1R2K1 w - - 0 20; bm dxc5 Bxc5; id "tactics.054";

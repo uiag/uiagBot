@@ -1,116 +1,69 @@
-## Stockfish
+# Governance and responsibilities
 
-### Stockfish organization
+A detailed breakdown of the team members responsible for Stockfish repositories, Fishtest infrastructure, domain hosting, and official communication channels.
 
-**Link**: https://github.com/official-stockfish  
-**Type**: Organization, GitHub Team for Open Source  
-**Owners**: [glinscott] [mcostalba] [zamar] [snicolet] [vondele] [disservin]
+## Stockfish Organization
 
-The Owners of the organization have Admin access to all repositories and can add new owners and maintainers.  
-Maintainers have "Admin" permission level on the repo.
-Collaborators have "Write" permission level on the repo.
+| Role | Access Level | Description |
+| :--- | :--- | :--- |
+| **Owners** | Admin (Org-wide) | Full access to all repos; can manage members and roles. |
+| **Maintainers** | Admin (Repo) | Administrative permissions for specific repositories. |
+| **Collaborators** | Write | Permission to push changes to specific repositories. |
 
-#### Stockfish repository
+| Link | Type | Owners |
+| :--- | :--- | :--- |
+| [official-stockfish](https://github.com/official-stockfish) | Organization, GitHub Team for Open Source | [glinscott], [mcostalba], [zamar], [snicolet], [vondele], [disservin] |
 
-**Link**: https://github.com/official-stockfish/Stockfish  
-**Active Maintainers**: [disservin] [snicolet] [vondele]  
-**Inactive Maintainers**: [glinscott] [mcostalba] [zamar] [locutus2]
+-----
 
-#### Fishtest repository
+### Repository Management
 
-**Link**: https://github.com/official-stockfish/fishtest  
-**Maintainers**: [ppigazzini]  
-**Collaborators**: [zungur]  
-**Inactive Maintainers**: [tomtor] [stefano80] [glinscott]
+| Repository | Link | Maintainers | Collaborators |
+| :--- | :--- | :--- | :--- |
+| **Stockfish** | [Stockfish](https://github.com/official-stockfish/Stockfish) | [disservin], [snicolet], [vondele]<br>***Inactive:** [glinscott], [mcostalba], [zamar][zamar], [locutus2]* | - |
+| **Fishtest** | [fishtest](https://github.com/official-stockfish/fishtest) | [ppigazzini]<br>***Inactive:** [tomtor][tomtor], [stefano80][stefano80], [glinscott]* | [zungur] |
+| **NN Trainer** | [nnue-pytorch](https://github.com/official-stockfish/nnue-pytorch) | [Sopel97], [vondele], [glinscott], [xu-shawn][xu-shawn] | - |
+| **Website** | [stockfish-web](https://github.com/official-stockfish/stockfish-web) | [daylen], [dav1312] | - |
+| **Books** | [books](https://github.com/official-stockfish/books) | [vondele], [snicolet], [disservin] | - |
 
-#### NN trainer repository
+-----
 
-**Link**: https://github.com/official-stockfish/nnue-pytorch  
-**Maintainers**: [Sopel97] [vondele] [glinscott]
+## Infrastructure & Hosting
 
-#### Website repository
+### Fishtest
 
-**Link**: https://github.com/official-stockfish/stockfish-web  
-**Maintainer**: [daylen] [dav1312]
+| Service | Link | Owner | Maintainers | Contributors |
+| :--- | :--- | :--- | :--- | :--- |
+| **VPS** | [tests.stockfishchess.org](https://tests.stockfishchess.org) | [glinscott] | [ppigazzini], [zungur] | [vondele], [disservin] |
+| **Networks** | data.stockfishchess.org / [tests.stockfishchess.org/nns](https://tests.stockfishchess.org/nns) | [glinscott] | [ppigazzini], [zungur] | [vondele], [disservin] |
+| **AWS S3 Backups** | Mongodb & Nets | [glinscott] | - | [ppigazzini], [vondele], [disservin] |
 
-#### Books repository
+### Historical data
 
-**Link**: https://github.com/official-stockfish/books  
-**Maintainers**: [vondele] [snicolet] [disservin]
+| Resource | Link / Resource | Owner / Admin | Contributor |
+| :--- | :--- | :--- | :--- |
+| **Hugging Face** | [official-stockfish](https://huggingface.co/official-stockfish) | [vondele], [disservin]| [robertnurnberg] |
+| **Archived Releases** | [drive.google.com](https://drive.google.com/drive/folders/1nzrHOyZMFm4LATjF5ToRttCU0rHXGkXI) | [daylen] | - |
+| **Past Tests (a)** | [fishcooking-results](https://groups.google.com/g/fishcooking-results) | [ppigazzini], [vondele], [zungur] | - |
+| **Past Tests (b)** | [fishcooking\_results](https://groups.google.com/g/fishcooking_results) | [mcostalba] | - |
 
----
+### Main Website
 
-## Fishtest
+| Component | Resource | Owner |
+| :--- | :--- | :--- |
+| **Domain** | [stockfishchess.org](https://stockfishchess.org/) | [daylen] |
+| **CDN** | Content Delivery | [daylen] |
 
-### VPS
+-----
 
-**Link**: https://tests.stockfishchess.org  
-**Owner**: [glinscott]  
-**Maintainers**: [ppigazzini] [zungur]
+## Social Media & Community
 
-### Networks Server repository
-
-**Link**: https://github.com/ppigazzini/net-server  
-**Maintainers**: [ppigazzini]  
-
-### Networks
-
-**Server**: data.stockfishchess.org see also https://tests.stockfishchess.org/nns  
-**Owner**: [glinscott]  
-**Maintainers**: [ppigazzini] [zungur]
-
-### S3 Mongodb & Nets backups
-
-**Owner**: [glinscott]
-
-### History of past tests
-
-**Link**: https://groups.google.com/g/fishcooking-results  
-**Owners**: [ppigazzini] [vondele] [zungur]  
-**Link**: https://groups.google.com/g/fishcooking_results  
-**Owner**: [mcostalba]
-
----
-
-## Website
-
-### Hosting
-
-**Link**: https://stockfishchess.org/  
-**Domain**: [daylen] (stockfishchess.org)  
-**CDN**: [daylen]
-
----
-
-## Social
-
-### Twitter
-
-**Link**: https://twitter.com/stockfishchess  
-**Owner**: [daylen]  
-**Maintainer**: [daylen]
-
-### Facebook
-
-**Link**: https://www.facebook.com/stockfishchess  
-**Owner**: [daylen]  
-**Maintainer**: [daylen]
-
-### Discord server
-
-**Link**: https://discord.gg/GWDRS3kU6R  
-**Owner**: [disservin]  
-**Admins**: [Sopel97] [vondele]
-
-### Forum (deprecated, use discord)
-
-**Link**: https://groups.google.com/g/fishcooking  
-**Owner**: [mcostalba]
-
-### Abrok (unofficial development versions)
-
-**Link**: http://abrok.eu/stockfish/  
-**Owner**: Roman Korba ([roman.korba@t-online.de](mailto:roman.korba@t-online.de), [korba.roman@gmail.com](mailto:korba.roman@gmail.com))
+| Platform | Link | Owner | Admin |
+| :--- | :--- | :--- | :--- |
+| **Discord** | [Join Server](https://discord.gg/GWDRS3kU6R) | [disservin]| [Sopel97], [vondele]
+| **Twitter** | [@stockfishchess](https://twitter.com/stockfishchess) | [daylen] | - |
+| **Bluesky** | [@stockfishchess.org](https://bsky.app/profile/stockfishchess.org) | [dav1312] | - |
+| **Facebook** | [stockfishchess](https://www.facebook.com/stockfishchess) | [daylen] | - |
 
 [glinscott]: https://github.com/glinscott
 [mcostalba]: https://github.com/mcostalba
@@ -127,3 +80,5 @@ Collaborators have "Write" permission level on the repo.
 [locutus2]: https://github.com/locutus2
 [noobpwnftw]: https://github.com/noobpwnftw
 [dav1312]: https://github.com/dav1312
+[xu-shawn]: https://github.com/xu-shawn
+[robertnurnberg]: https://github.com/robertnurnberg

@@ -1,6 +1,8 @@
+# Introduction
+
 [Stockfish](https://stockfishchess.org/) is a **free, open source, and strong UCI chess engine** derived from Glaurung 2.1 that analyzes chess positions and computes the optimal moves.
 
-Stockfish **does not include a graphical user interface** (GUI), which is needed to display a chessboard and to make it easy to input moves. Several [free GUIs](Download-and-usage#free) have been developed independently of Stockfish and are available online. 
+Stockfish **does not include a graphical user interface** (GUI), which is needed to display a chessboard and to make it easy to input moves. Several [free GUIs](Download-and-usage#free) have been developed independently of Stockfish and are available online.
 **Read the documentation for the GUI** of your choice to find out how to use it with Stockfish.
 
 ## Guides
@@ -9,7 +11,7 @@ Stockfish **does not include a graphical user interface** (GUI), which is needed
   * [Download Stockfish](Download-and-usage#download-stockfish)
   * [Download GUI](Download-and-usage#download-a-chess-gui)
   * [Install in GUI](Download-and-usage#install-in-a-chess-gui)
-  * [Commands and options](UCI-&-Commands)
+  * [Commands and options](UCI-Protocol-and-Stockfish-Commands)
   * [Frequently asked questions (FAQ)](Stockfish-FAQ)
 
 * [For Developers](Developers)
@@ -30,9 +32,11 @@ If you're looking for any kind of assistance with Stockfish.
 * Trainer: [official-stockfish/nnue-pytorch](https://github.com/official-stockfish/nnue-pytorch)
 * Fishtest: [official-stockfish/fishtest](https://github.com/official-stockfish/fishtest)
 * Website: [official-stockfish/stockfish-web](https://github.com/official-stockfish/stockfish-web)
-* WDL model: [official-stockfish/WDL_model](https://github.com/official-stockfish/WDL_model)  
+* Docs website: [official-stockfish/docs](https://github.com/official-stockfish/docs)
+* WDL model: [official-stockfish/WDL_model](https://github.com/official-stockfish/WDL_model)
 * Fishtest worker setup: [ppigazzini/fishtest-worker-setup](https://github.com/ppigazzini/fishtest-worker-setup)
 * Matetrack: [vondele/matetrack](https://github.com/vondele/matetrack)
+* Nettest: [vondele/nettest](https://github.com/vondele/nettest)
 * Mac app: [daylen/stockfish-mac](https://github.com/daylen/stockfish-mac)
 
 See also our overview of [Governance and Responsibilities](Governance-and-responsibilities).

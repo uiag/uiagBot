@@ -1,0 +1,5 @@
+# Generated results: JSON reports, the match history, and the games.
+# history.jsonl is what `run.py rating` reads, so keep it if you want the
+# rating to survive a clean checkout -- remove the line below to track it.
+*
+!.gitignore

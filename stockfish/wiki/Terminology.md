@@ -24,7 +24,7 @@ Is the depth of the deepest principal variation line in the search.
 
 ### Multiple PVs
 
-Also known as "number of lines" or "multiple lines".
+Also known as "multiPV", "number of lines" or "multiple lines".
 The top N moves and their [principal variations](#principal-variation) can be computed. This gives additional insight in the options of the position. However, in Stockfish, this weakens the quality of the best move computed, as resources are used to compute other moves.
 
 ### Transposition Table
@@ -63,6 +63,7 @@ The idea of ignoring certain parts of the search tree in order to reduce the amo
 
 ### Null Move Pruning
 
+Also known as "NMP".
 Based on the assumption that, if we can reach beta by not making a move at lower depths, we will most likely be able to reach it anyway.
 
 ### Futility Pruning

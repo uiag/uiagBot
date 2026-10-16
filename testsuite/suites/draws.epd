@@ -1,0 +1,19 @@
+# Endings whose value is settled theory.  The c0 comment starts with
+# the expected verdict; the suite checks that a score of exactly 0
+# means 'draw' and anything else means 'not a draw'.
+7k/5Q2/6K1/8/8/8/8/8 b - - 0 1; id "draws.01"; c0 "draw: stalemate";
+5k2/5P2/5K2/8/8/8/8/8 b - - 0 1; id "draws.02"; c0 "draw: stalemate in front of a pawn";
+8/8/8/5k2/8/8/8/5K2 w - - 0 1; id "draws.03"; c0 "draw: king against king";
+4k3/8/8/8/8/8/8/4K1N1 w - - 0 1; id "draws.04"; c0 "draw: knight against a bare king";
+4k3/8/8/8/8/8/8/4K1B1 w - - 0 1; id "draws.05"; c0 "draw: bishop against a bare king";
+4k3/8/8/8/8/8/8/1N2K1N1 w - - 0 1; id "draws.06"; c0 "draw: two knights cannot force mate";
+8/8/8/4k3/8/8/4K3/7Q w - - 100 200; id "draws.07"; c0 "draw: fifty moves reached, a queen up";
+8/8/8/4k3/8/8/4P3/4K3 w - - 0 1; id "draws.08"; c0 "draw: king and pawn, black king in front";
+8/8/8/8/8/4k3/4P3/4K3 w - - 0 1; id "draws.09"; c0 "draw: king and pawn, blockaded";
+8/8/8/3k4/8/8/4P3/4K3 w - - 0 1; id "draws.10"; c0 "draw: king and pawn, black king in the square";
+4k3/8/8/8/8/8/8/2B1K1N1 w - - 0 1; id "draws.11"; c0 "win: bishop and knight mate";
+4k3/8/8/8/8/8/8/4K2R w K - 0 1; id "draws.12"; c0 "win: rook against a bare king";
+8/8/8/4k3/8/8/4K3/7Q w - - 40 200; id "draws.13"; c0 "win: a queen up, 40 half moves played";
+4k3/8/8/8/8/8/4P3/4K3 w - - 0 1; id "draws.14"; c0 "win: king and pawn, white has the opposition";
+4k3/4P3/4K3/8/8/8/8/8 w - - 0 1; id "draws.15"; c0 "win: king and pawn on the seventh";
+8/6p1/8/6K1/6P1/8/8/6k1 w - - 0 1; id "draws.16"; c0 "win: the white king is in front of the pawn";

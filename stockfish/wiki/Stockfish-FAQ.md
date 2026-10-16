@@ -25,7 +25,7 @@ The full plots of win, loss, and draw probability are given below. From these pr
 
 | Probabilities | Expected match score |
 |---|---|
-| <img src="https://user-images.githubusercontent.com/4202567/206894542-a5039063-09ff-4f4d-9bad-6e850588cac9.png" width="400"> | <img src="https://user-images.githubusercontent.com/4202567/206895934-f861a6a8-2e60-4592-a8f1-89d9aad8dac4.png" width="400"> |
+| <img src="https://user-images.githubusercontent.com/4202567/206894542-a5039063-09ff-4f4d-9bad-6e850588cac9.png" alt="A line graph plotting 'Probability' on the y-axis (from 0 to 1) against 'Evaluation' on the x-axis, featuring three distinct curves representing match outcomes. A curve labeled 'loss' starts near a probability of 1 at an evaluation of -2, sharply drops to 0.5 at -1, and flattens to 0 past 0. A curve labeled 'win' mirrors this, with 1 at an evaluation of +2, drops to 0.5 at +1, and flattens to 0 when the evaluation is less than 0. A curve labeled 'draw' forms a bell shape centered at an evaluation of 0, with a probability near 1 at 0, 0.5 at -1 and +1, and near 0 beyond -2 and +2." width="400"> | <img src="https://user-images.githubusercontent.com/4202567/206895934-f861a6a8-2e60-4592-a8f1-89d9aad8dac4.png" alt="A line graph plotting 'Expected match score' on the y-axis (from 0 to 1) against 'Evaluation' on the x-axis (from -2 to 2), depicted by a single curve. Starting near 0 at an evaluation of -2, rising steeply around -1 before flattening into a brief plateau at a score of 0.5 when the evaluation is close to 0, and then rising sharply again around 1 until it plateaus at a maximum score of 1 as the evaluation approaches 2." width="400"> |
 
 The probability of winning or drawing a game, of course, depends on the opponent and the time control. With bullet games, the draw rate will be lower, and against a weak opponent, even a negative evaluation could result in a win. These graphs have been generated from a model derived from Fishtest data for Stockfish playing against Stockfish (so an equally strong opponent), at 60+0.6s per game. The curves are expected to evolve, i.e. as the engines get stronger, an evaluation of 0.0 will approach the 100% draw limit. These curves are for SF15.1 (Dec 2022).
 
@@ -106,9 +106,13 @@ If a reported decrease lies outside those error bounds, meaning the ranges do no
 
 ## Stockfish crashed
 
-Stockfish may crash if fed incorrect FENs, or FENs with illegal positions. Full validation code is complex to write, and within the UCI protocol, there is no established mechanism to communicate such an error back to the GUI. Therefore, Stockfish is written with the expectation that the input FEN is correct.
+Stockfish may crash if fed incorrect FENs, or FENs with illegal positions. Positions are deemed legal if they are reachable from the starting position in game play. As a consequence, this naturally limits the number of pieces on the board, the positions of pawns, etc. 
+Limited sanitization is done (missing move counters, invalid en passant target square).
 
-On the other hand, the GUI must carefully check fens. If you find a GUI through which you can crash Stockfish, or any other engine, then by all means, report it to that GUI's developers.
+> [!NOTE]
+> Stockfish has implemented stricter validation for FEN strings and UCI move sequences.  
+> The engine will now output `info string CRITICAL ERROR: Command <full UCI command> failed. Reason: <Error Message>` identifying the specific issue (e.g., `Invalid FEN`, `Unsupported position`, or `Illegal move`) and then terminate the process using `std::exit(1)`.  
+> _This behavior is available only since Stockfish 19._
 
 ## Does Stockfish support chess variants?
 
@@ -120,7 +124,7 @@ No, Stockfish is a chess engine that uses the CPU only for chess evaluation. Its
 
 ## Executing Stockfish opens a CMD window
 
-![image](https://github.com/user-attachments/assets/08ad3bae-2fa5-4b77-a65e-ec272727a7d5)
+![A screenshot of a command prompt window on Windows. Inside the terminal area, a single line at the very top reads: "Stockfish 17 by the Stockfish developers (see AUTHORS file)".](https://github.com/user-attachments/assets/08ad3bae-2fa5-4b77-a65e-ec272727a7d5)
 
 Stockfish is a command line program, so **this behavior is intentional** and serves as the interface for interacting with the engine.
 
@@ -130,7 +134,7 @@ If you prefer a **more user-friendly experience** with a **chessboard and additi
 
 ### Available commands
 
-The CMD window allows you to input various commands and receive corresponding outputs from Stockfish. If you want to explore the available commands and their explanations, you can refer to the [Commands](UCI-&-Commands) page but this is **only recommended for advanced users and developers**.
+The CMD window allows you to input various commands and receive corresponding outputs from Stockfish. If you want to explore the available commands and their explanations, you can refer to the [Commands](UCI-Protocol-and-Stockfish-Commands) page but this is **only recommended for advanced users and developers**.
 
 ## What is depth?
 
@@ -150,13 +154,13 @@ If `UCI_Elo` is set, the engine converts the given value internally into a `Skil
 
 ### How does Stockfish choose a weak move?
 
-Stockfish first identifies at least 4 candidate moves, which can be increased using the `MultiPV` UCI option. To play weakly, it uses a statistical rule that applies a randomized bias to the scores of the slightly worse moves among these candidates. The lower the set `Skill Level`, the bigger this random boost is, making it highly probable that the engine bypasses the truly best move and selects a suboptimal choice instead.
+Stockfish first identifies at least 4 candidate moves, which can be increased (but not decreased) using the `MultiPV` UCI option. To play weakly, it uses a statistical rule that applies a randomized bias to the scores of the slightly worse moves among these candidates. The lower the set `Skill Level`, the bigger this random boost is, making it highly probable that the engine bypasses the truly best move and selects a suboptimal choice instead.
 
 ### When is the weak move selected?
 
 The engine picks the suboptimal move during search at `depth = 1 + int(Skill Level)` (so level 0 => depth 1, level 10 => depth 11, etc.).
 
-![Stockfish_Skill_Level_UCI_Elo](https://github.com/user-attachments/assets/601bb786-dc57-46aa-b9ca-7da7e0f282a6)
+![A line graph plotting "UCI_Elo Rating" against "Internal Skill Level" on a scale from 0 to 19. The graph shows a line with individual data points that rises sharply from an Elo of 1347 at skill level 0, curves upward through the mid-levels, and gradually plateaus to a peak Elo of 3212 at skill level 19, demonstrating that Elo rating gains slow down significantly at higher internal skill levels.](https://github.com/user-attachments/assets/e7cf2b91-f31b-4e14-a55f-e9c267b0dc3f)
 
 ## Stockfish is slower than expected
 
@@ -176,11 +180,12 @@ You can often resolve this with a **temporary** fix by manually telling the Oper
 You may need to do this each time you start a new Stockfish session, as the setting is not permanent.
 
 On Windows:
-1.  Start Stockfish (e.g., run the executable or begin analysis in your chess GUI).
-2.  Open **Task Manager** (press `Ctrl` + `Shift` + `Esc`).
-3.  Click on the **"Details"** tab.
-4.  Find Stockfish in the list, right-click on it.
-5.  Go to **Set priority** and choose **"Above Normal"**.
+
+1. Start Stockfish (e.g., run the executable or begin analysis in your chess GUI).
+2. Open **Task Manager** (press `Ctrl` + `Shift` + `Esc`).
+3. Click on the **"Details"** tab.
+4. Find Stockfish in the list, right-click on it.
+5. Go to **Set priority** and choose **"Above Normal"**.
 
 > [!NOTE]
 > If you prefer to limit Stockfish to run on specific cores instead of having a higher general priority, in the same right-click menu, choose "Set affinity" and enable only the faster performance cores. This is also temporary and must be repeated each session.

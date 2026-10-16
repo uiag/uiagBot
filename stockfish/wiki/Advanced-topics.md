@@ -1,3 +1,13 @@
+# Advanced Topics
+
+- [Syzygy tablebases](#syzygy-tablebases)
+- [Large Pages](#large-pages)
+  - [Linux](#linux)
+  - [Windows](#windows)
+- [Measure the speed of Stockfish](#measure-the-speed-of-stockfish)
+- [Cluster version](#cluster-version)
+- [Classical versus NNUE evaluation](#classical-versus-nnue-evaluation)
+
 ## Syzygy tablebases
 
 If the engine is searching a position that is not in the tablebases (e.g. a position with 8 pieces), it will access the tablebases (TB) during the search. If the engine reports a very large score (near 200.00), it means that it has found a winning line into a tablebase position. For general play, tablebases bring only a limited increase in strength (see [our Elo measurements](Useful-data#elo-gain-using-syzygy)).
@@ -29,23 +39,24 @@ We suggest that you reboot your computer after you have enabled large pages, bec
 
 ## Measure the speed of Stockfish
 
-The "speed of Stockfish" is the number of nodes (positions) Stockfish can search per second. 
+The "speed of Stockfish" is the number of nodes (positions) Stockfish can search per second.
 Nodes per second (nps) is a useful benchmark number as the same version of Stockfish playing will play stronger with larger nps.
 Different versions of Stockfish will play at different nps, for example, if the NNUE network architecture changes, but in this case the nps difference is not related to the strength difference.
 
 > [!NOTE]
-> * Stop all other applications when measuring the speedup of Stockfish
-> * Run at least 20 default benches (depth 13) for each build of Stockfish to have accurate measures
-> * A speedup of 0.3% could be meaningless (i.e. within the measurement noise)
+>
+> - Stop all other applications when measuring the speedup of Stockfish
+> - Run at least 20 default benches (depth 13) for each build of Stockfish to have accurate measures
+> - A speedup of 0.3% could be meaningless (i.e. within the measurement noise)
 
 To measure the speed of several builds of Stockfish, use one of these applications:
-* All OS:
-  * [pyshbench](https://github.com/hazzl/pyshbench): Latest release [pyshbench](https://github.com/hazzl/pyshbench/archive/master.zip)
-  * bash script `bench_parallel.sh` (run `bash bench_parallel.sh` for the help)  
-    it might be that you have to install gawk as well on your system to not get syntax errors.
+
+- All OS:
+  - [pyshbench](https://github.com/hazzl/pyshbench): Latest release [pyshbench](https://github.com/hazzl/pyshbench/archive/master.zip)
+  - bash script `bench_parallel.sh` (run `bash bench_parallel.sh` for the help)
 
     <details><summary>Click to view</summary>
-    
+
     ```bash
     #!/bin/bash
     _bench () {
@@ -109,17 +120,18 @@ To measure the speed of several builds of Stockfish, use one of these applicatio
     done
     
     printf "\rrun   sf_base   sf_test      diff\n"
-    paste sf_temp0.txt sf_base1.txt sf_test1.txt | awk '{printf "%3d  %8d  %8d  %8+d\n", $1, $2, $3, $3-$2}'
-    #paste sf_temp0.txt sf_base1.txt sf_test1.txt | awk '{printf "%3d\t%8d\t%8d\t%7+d\n", $1, $2, $3, $3-$2}'
+    paste sf_temp0.txt sf_base1.txt sf_test1.txt | awk '{printf "%3d  %8d  %8d  %+8d\n", $1, $2, $3, $3-$2}'
+    #paste sf_temp0.txt sf_base1.txt sf_test1.txt | awk '{printf "%3d\t%8d\t%8d\t%+7d\n", $1, $2, $3, $3-$2}'
     paste sf_base1.txt sf_test1.txt | awk '{printf "%d\t%d\t%d\n", $1, $2, $2-$1}' > sf_temp0.txt
     
     # compute: sample mean, 1.96 * std of sample mean (95% of samples), speedup
     # std of sample mean = sqrt(NR/(NR-1)) * (std population) / sqrt(NR)
-    cat sf_temp0.txt | awk '{sum1 += $1 ; sumq1 += $1**2 ;sum2 += $2 ; sumq2 += $2**2 ;sum3 += $3 ; sumq3 += $3**2 } END {printf "\nsf_base = %8d +/- %6d (95%)\nsf_test = %8d +/- %6d (95%)\ndiff    = %8d +/- %6d (95%)\nspeedup = %.5f% +/- %.3f% (95%)\n\n", sum1/NR , 1.96 * sqrt(sumq1/NR - (sum1/NR)**2)/sqrt(NR-1) , sum2/NR , 1.96 * sqrt(sumq2/NR - (sum2/NR)**2)/sqrt(NR-1) , sum3/NR  , 1.96 * sqrt(sumq3/NR - (sum3/NR)**2)/sqrt(NR-1) , 100*(sum2 - sum1)/sum1 , 100 * (1.96 * sqrt(sumq3/NR - (sum3/NR)**2)/sqrt(NR-1)) / (sum1/NR) }'
+    cat sf_temp0.txt | awk '{sum1 += $1 ; sumq1 += $1*$1 ;sum2 += $2 ; sumq2 += $2*$2 ;sum3 += $3 ; sumq3 += $3*$3 } END {printf "\nsf_base = %8d +/- %6d (95%%)\nsf_test = %8d +/- %6d (95%%)\ndiff    = %8d +/- %6d (95%%)\nspeedup = %.5f%% +/- %.3f%% (95%%)\n\n", sum1/NR , 1.96 * sqrt(sumq1/NR - (sum1/NR)*(sum1/NR))/sqrt(NR-1) , sum2/NR , 1.96 * sqrt(sumq2/NR - (sum2/NR)*(sum2/NR))/sqrt(NR-1) , sum3/NR  , 1.96 * sqrt(sumq3/NR - (sum3/NR)*(sum3/NR))/sqrt(NR-1) , 100*(sum2 - sum1)/sum1 , 100 * (1.96 * sqrt(sumq3/NR - (sum3/NR)*(sum3/NR))/sqrt(NR-1)) / (sum1/NR) }'
     
     # remove temporary files
     rm -f sf_base0.txt sf_test0.txt sf_temp0.txt sf_base1.txt sf_test1.txt
     ```
+
     </details>
 
     <details><summary>Bench two git branches with bench_parallel</summary>
@@ -153,28 +165,31 @@ To measure the speed of several builds of Stockfish, use one of these applicatio
     echo "Running bench_parallel.sh with stockfish-$BRANCH1 and stockfish-$BRANCH2..."
     ./bench_parallel.sh ./stockfish-$BRANCH1 ./stockfish-$BRANCH2 $DEPTH $RUNS
     ```
-    </details>
-  * [`speedtest`](UCI-&-Commands#speedtest) command
 
-* Windows only:
-  * [FishBench](https://github.com/zardav/FishBench): Latest release [Fishbench v6.0](https://github.com/zardav/FishBench/releases/download/v6.0/FishBench.zip)
-  * [Buildtester](http://software.farseer.org/): Latest release [Buildtester 1.4.7.0](http://software.farseer.org/Software/BuildTester.7z)
+    </details>
+  - [`speedtest`](UCI-Protocol-and-Stockfish-Commands#speedtest) command
+
+- Windows only:
+  - [FishBench](https://github.com/zardav/FishBench): Latest release [Fishbench v6.0](https://github.com/zardav/FishBench/releases/download/v6.0/FishBench.zip)
+  - [Buildtester](http://software.farseer.org/): Latest release [Buildtester 1.4.7.0](http://software.farseer.org/Software/BuildTester.7z)
 
 ---
 
 ## Cluster version
 
-There is a branch developed with a MPI cluster implementation of Stockfish, allowing stockfish to run on clusters of compute nodes connected with a high-speed network. See https://github.com/official-stockfish/Stockfish/pull/1571 for some discussion of the initial implementation and https://github.com/official-stockfish/Stockfish/pull/1931 for some early performance results.
+There is a branch developed with a MPI cluster implementation of Stockfish, allowing stockfish to run on clusters of compute nodes connected with a high-speed network. See <https://github.com/official-stockfish/Stockfish/pull/1571> for some discussion of the initial implementation and <https://github.com/official-stockfish/Stockfish/pull/1931> for some early performance results.
 
 Feedback on this branch is welcome! Here are some git commands for people interested to test this MPI/Cluster idea:
 
 1. If you don't have the cluster branch yet on your local git repository, you can download the latest state of the [`official-stockfish/cluster`](https://github.com/official-stockfish/Stockfish/tree/cluster) branch, then switch to it with the following commands:
+
     ```bash
     git fetch official cluster:cluster
     git checkout -f cluster
     ```
 
 2. After switching to the cluster branch as above, see the README.md for detailed instructions on how to compile and run the branch. TL;DR:
+
     ```bash
     make clean
     make -j ARCH=x86-64-avx2 COMPCXX=mpic++ build
@@ -194,5 +209,6 @@ The NNUE evaluation was first introduced in shogi, and ported to Stockfish after
 On CPUs supporting modern vector instructions (avx2 and similar), the NNUE evaluation results in much stronger playing strength, even if the nodes per second computed by the engine is somewhat lower (roughly 50% of nps is typical).
 
 > [!NOTE]
+>
 > 1. The NNUE evaluation depends on the Stockfish binary and the network parameter file (see the `EvalFile` UCI option). Not every parameter file is compatible with a given Stockfish binary, but the default value of the EvalFile UCI option is the name of a network that is guaranteed to be compatible with that binary.
 > 2. To use the NNUE evaluation, the additional data file with neural network parameters needs to be available. Normally, this file is already embedded in the binary or it can be downloaded. The filename for the default (recommended) net can be found as the default value of the `EvalFile` UCI option, with the format `nn-[SHA256 first 12 digits].nnue` (for instance, `nn-c157e0a5755b.nnue`). This file can be downloaded from `https://tests.stockfishchess.org/api/nn/[filename]` replacing `[filename]` as needed.

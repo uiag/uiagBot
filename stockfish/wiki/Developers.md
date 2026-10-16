@@ -1,5 +1,7 @@
 # Instructions for Developers
 
+A guide for developers looking to contribute to Stockfish or integrate the engine into their own applications.
+
 - [Participating in the project](#participating-in-the-project)
 - [Using Stockfish in your own project](#using-stockfish-in-your-own-project)
 
@@ -45,7 +47,8 @@ This section provides instructions for setting up your environment to develop an
 <summary>Show more</summary>
 
 ##### Installing a compiler
-1. https://www.msys2.org/
+
+1. <https://www.msys2.org/>
 2. Download the installer
 
 In the MSYS2 Installer change the installation folder to:
@@ -65,7 +68,7 @@ Run the executable and in the installer choose:
 
 _There's a much higher quality version of this available on our [Discord](https://discord.com/channels/435943710472011776/1032922913499783169/1191837643256901732)._
 
-https://github.com/official-stockfish/Stockfish/assets/45608332/d0323339-21f1-4d1d-aa86-183a7e10ed06
+<https://github.com/official-stockfish/Stockfish/assets/45608332/d0323339-21f1-4d1d-aa86-183a7e10ed06>
 
 _More in depth information about various compilers can be found [here](Compiling-from-source#windows)._
 
@@ -87,7 +90,8 @@ sudo apt install build-essential git
 
 ##### clang-format
 
-From your normal package manager or through the install script found at https://apt.llvm.org/.
+From your normal package manager or through the install script found at <https://apt.llvm.org/>.
+
 ```bash
 sudo apt install clang-format-20
 ```
@@ -106,7 +110,7 @@ It is enough to run the following command in your terminal, instead of installin
 
 ```bash
 sudo xcode-select --install
-``` 
+```
 
 ##### clang-format
 
@@ -122,7 +126,6 @@ brew install clang-format@20
 > **Only really useful for maintainers.**  
 > Place the following file into `.git/hooks/pre-push` and make it executable (`chmod +x .git/hooks/pre-push`).  
 > This specific Git Hook (pre-push) prevents pushes to the master branch if there are uncommitted changes, formatting issues, or if commit messages do not contain a "Bench" or "No functional change" entry.
-
 
 <details>
 
@@ -180,6 +183,7 @@ done
 
 exit 0
 ```
+
 </details>
 
 ---
@@ -187,7 +191,7 @@ exit 0
 ## Using Stockfish in your own project
 
 1. **Review the Terms of Use:** First and foremost, you should **read our [Terms of Use](#terms-of-use)** and adhere to them carefully.
-2. **Understand the UCI Protocol:** Stockfish is a UCI chess engine, meaning it communicates via the Universal Chess Interface (UCI) protocol. You can find a detailed explanation of this protocol [here](https://backscattering.de/chess/uci/). Basic demonstrations of the available commands are available in [UCI & Commands](UCI-&-Commands).
+2. **Understand the UCI Protocol:** Stockfish is a UCI chess engine, meaning it communicates via the Universal Chess Interface (UCI) protocol. You can find a detailed explanation of this protocol [here](https://backscattering.de/chess/uci/). Basic demonstrations of the available commands are available in [UCI & Commands](UCI-Protocol-and-Stockfish-Commands).
 3. **Implement Process Communication:** Your application will need to interact with the Stockfish executable. This typically involves:
    - Opening the Stockfish executable.
    - Writing commands to its `stdin`.
@@ -196,8 +200,8 @@ exit 0
 ### Examples
 
 - **NodeJS**: You can follow [this guide](https://blog.logrocket.com/using-stdout-stdin-stderr-node-js/) on how to communicate with a program.
-  - Basic example of using Stockfish on the web: https://github.com/Disservin/html-js-stockfish
-- **Python**: Use python-chess (`pip install chess`): https://python-chess.readthedocs.io/en/latest/engine.html
+  - Basic example of using Stockfish on the web: <https://github.com/Disservin/html-js-stockfish>
+- **Python**: Use python-chess (`pip install chess`): <https://python-chess.readthedocs.io/en/latest/engine.html>
 - **C++**: [Boost.Process](https://www.boost.org/doc/libs/1_64_0/doc/html/process.html) can be used for easy process communication.
 - **Rust**: Examine the documentation on [how to spawn a Command](https://doc.rust-lang.org/std/process/struct.Command.html).
 
@@ -209,8 +213,8 @@ That is not possible. You will have to write your own logic to create such a fea
 
 > I want to get an evaluation of the current position.
 
-In order to get an accurate evaluation of the current position, you need to use the UCI [`go`](UCI-&-Commands#go) command with a specified limit (e.g., time, depth, nodes).  
-An [`eval`](UCI-&-Commands#eval) command is available, but it only provides a static and very rough evaluation of the position without any search involved and is not recommended for most use cases.
+In order to get an accurate evaluation of the current position, you need to use the UCI [`go`](UCI-Protocol-and-Stockfish-Commands#go) command with a specified limit (e.g., time, depth, nodes).  
+An [`eval`](UCI-Protocol-and-Stockfish-Commands#eval) command is available, but it only provides a static and very rough evaluation of the position without any search involved and is not recommended for most use cases.
 
 ### Terms of use
 

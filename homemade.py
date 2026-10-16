@@ -1,129 +1,139 @@
 """
-Some example classes for people who want to create a homemade bot.
+The homemade engine that lichess-bot drives.
 
-With these classes, bot makers will not have to implement the UCI or XBoard interfaces themselves.
+`MyEngine` is a thin adapter: it converts lichess-bot's time limit into a
+search request for the C engine in engine/ (loaded through engine_core.py) and
+converts the result back into a `chess.engine.PlayResult`, including the score,
+depth, node count and principal variation so that lichess-bot can show search
+statistics in chat and apply its own draw/resign rules.
+
+Engine settings can be given under `engine: homemade_options:` in config.yml:
+
+    homemade_options:
+      Hash: 1024          # transposition table size in MB
+      Threads: 6         # search threads (Lazy SMP)
+      EvalMode: hce      # hce | nnue | blend
 """
-import chess
-from chess.engine import PlayResult, Limit
-import random
-from lib.engine_wrapper import MinimalEngine
-from lib.lichess_types import MOVE, HOMEMADE_ARGS_TYPE
+from __future__ import annotations
+
 import logging
-from chessGame import ChessGame
-from bot import Bot
-import time
+import os
+from typing import TYPE_CHECKING, Any, Optional
 
+import chess
+from chess.engine import Limit, PlayResult
 
-# Use this logger variable to print messages to the console or log files.
-# logger.info("message") will always print "message" to the console or log file.
-# logger.debug("message") will only print "message" if verbose logging is enabled.
+from lib.engine_wrapper import MinimalEngine
+from lib.lichess_types import MOVE
+
+if TYPE_CHECKING:
+    from engine_core import Engine
+
 logger = logging.getLogger(__name__)
+
+# One process-wide engine instance: the C side keeps a single transposition
+# table and thread pool, and lichess-bot plays one game at a time by default.
+_ENGINE: Optional["Engine"] = None
+
+
+def get_engine(hash_mb: int = 256, threads: Optional[int] = None,
+               eval_mode: str = "hce") -> "Engine":
+    """Create the shared engine on first use."""
+    global _ENGINE
+    if _ENGINE is None:
+        # Imported here so that the example engines below stay usable without
+        # cffi and without compiling anything.
+        from engine_core import Engine
+        _ENGINE = Engine(hash_mb=hash_mb, threads=threads, eval_mode=eval_mode)
+    return _ENGINE
 
 
 class ExampleEngine(MinimalEngine):
-    """An example engine that all homemade engines inherit."""
+    """Base class for homemade engines; see the project wiki."""
 
 
-# Bot names and ideas from tom7's excellent eloWorld video
-
-class RandomMove(ExampleEngine):
-    """Get a random move."""
-
-    def search(self, board: chess.Board, *args: HOMEMADE_ARGS_TYPE) -> PlayResult:  # noqa: ARG002
-        """Choose a random move."""
-        return PlayResult(random.choice(list(board.legal_moves)), None)
-
-
-class Alphabetical(ExampleEngine):
-    """Get the first move when sorted by san representation."""
-
-    def search(self, board: chess.Board, *args: HOMEMADE_ARGS_TYPE) -> PlayResult:  # noqa: ARG002
-        """Choose the first move alphabetically."""
-        moves = list(board.legal_moves)
-        moves.sort(key=board.san)
-        return PlayResult(moves[0], None)
+def _option(options: Any, key: str, default: Any) -> Any:
+    """Read a value from lichess-bot's option mapping, if present."""
+    try:
+        if options is None:
+            return default
+        if hasattr(options, "lookup"):
+            value = options.lookup(key)
+            return default if value is None else value
+        return options.get(key, default)
+    except Exception:                                  # noqa: BLE001
+        return default
 
 
-class FirstMove(ExampleEngine):
-    """Get the first move when sorted by uci representation."""
+class MyEngine(ExampleEngine):
+    """Search with the C engine in engine/."""
 
-    def search(self, board: chess.Board, *args: HOMEMADE_ARGS_TYPE) -> PlayResult:  # noqa: ARG002
-        """Choose the first move alphabetically in uci representation."""
-        moves = list(board.legal_moves)
-        moves.sort(key=str)
-        return PlayResult(moves[0], None)
+    def __init__(self, commands: Any, options: Any, stderr: Optional[int],
+                 draw_or_resign: Any, game: Any = None, name: Optional[str] = None,
+                 **popen_args: str) -> None:
+        """Start up (and if necessary build) the engine."""
+        super().__init__(commands, options, stderr, draw_or_resign, game, name, **popen_args)
 
+        default_threads = max(1, (os.cpu_count() or 1) - 2)
+        hash_mb = int(_option(options, "Hash", 1024))
+        threads = int(_option(options, "Threads", default_threads))
+        eval_mode = str(_option(options, "EvalMode", "hce"))
 
-class MyEngine(MinimalEngine):
-    def __init__(self, commands, options, stderr,
-                 draw_or_resign, game, **popen_args: str):
-        super().__init__(commands, options, stderr, draw_or_resign, game, **popen_args)
-        print(game.is_white)
-        if game.is_white:
-            self.bot = ChessGame(1)
+        self.chess_engine = get_engine(hash_mb=hash_mb, threads=threads, eval_mode=eval_mode)
+        self.chess_engine.set_hash(hash_mb)
+        self.chess_engine.set_threads(threads)
+        self.chess_engine.set_eval_mode(eval_mode)
+        self.chess_engine.new_game()
+        logger.info("MyEngine: %s, %d threads, %d MB hash, eval %s",
+                    self.chess_engine.version, self.chess_engine.threads,
+                    self.chess_engine.hash_mb, self.chess_engine.eval_mode)
+
+    def search(self, board: chess.Board, time_limit: Limit, ponder: bool,
+               draw_offered: bool, root_moves: MOVE) -> PlayResult:
+        """Pick a move for `board` within `time_limit`."""
+        kwargs: dict[str, int] = {}
+
+        if isinstance(time_limit.time, (int, float)):
+            kwargs["movetime_ms"] = max(1, int(time_limit.time * 1000))
         else:
-            self.bot = ChessGame(-1)
+            def ms(value: Any) -> int:
+                return max(0, int(value * 1000)) if isinstance(value, (int, float)) else 0
+            kwargs["wtime_ms"] = ms(time_limit.white_clock)
+            kwargs["btime_ms"] = ms(time_limit.black_clock)
+            kwargs["winc_ms"] = ms(time_limit.white_inc)
+            kwargs["binc_ms"] = ms(time_limit.black_inc)
+            if not kwargs["wtime_ms"] and not kwargs["btime_ms"]:
+                kwargs["movetime_ms"] = 3000          # unlimited game, no clock
+        if isinstance(time_limit.depth, int):
+            kwargs["depth"] = time_limit.depth
+        if isinstance(time_limit.nodes, int):
+            kwargs["nodes"] = time_limit.nodes
 
-    def search(self,
-               board: chess.Board,
-               time_limit: Limit,
-               ponder: bool,  # noqa: ARG002
-               draw_offered: bool,
-               root_moves: MOVE) -> PlayResult:
-        print(time.time())
-        self.bot.game = board
-        self.bot.turn = board.turn
-        self.bot.remainingWhite = time_limit.white_clock
-        self.bot.remainingBlack = time_limit.black_clock
-        if self.bot.bot.white:
-            self.bot.increment = time_limit.white_inc
+        result = self.chess_engine.search(board, **kwargs)
+        move = result.move
+
+        # Honour a restricted move list (e.g. from an endgame tablebase).
+        if isinstance(root_moves, list) and root_moves:
+            if move not in root_moves:
+                move = next((m for m in result.pv if m in root_moves), root_moves[0])
+                logger.info("restricting the move to %s from the allowed list", move)
+
+        if result.mate:
+            score: chess.engine.Score = chess.engine.Mate(result.mate)
         else:
-            self.bot.increment = time_limit.black_inc
+            score = chess.engine.Cp(result.score_cp)
 
-        bestMove, evaluation = self.bot.moveBot()
-        return PlayResult(bestMove, None, draw_offered=draw_offered)
+        info = {
+            "score": chess.engine.PovScore(score, board.turn),
+            "depth": result.depth,
+            "seldepth": result.seldepth,
+            "nodes": result.nodes,
+            "nps": result.nps,
+            "time": result.time_ms / 1000,
+            "hashfull": result.hashfull,
+            "pv": result.pv,
+            "string": f"eval {self.chess_engine.eval_mode}",
+        }
 
-
-class ComboEngine(ExampleEngine):
-    """
-    Get a move using multiple different methods.
-
-    This engine demonstrates how one can use `time_limit`, `draw_offered`, and `root_moves`.
-    """
-
-    def search(self,
-               board: chess.Board,
-               time_limit: Limit,
-               ponder: bool,  # noqa: ARG002
-               draw_offered: bool,
-               root_moves: MOVE) -> PlayResult:
-        """
-        Choose a move using multiple different methods.
-
-        :param board: The current position.
-        :param time_limit: Conditions for how long the engine can search (e.g. we have 10 seconds and search up to depth 10).
-        :param ponder: Whether the engine can ponder after playing a move.
-        :param draw_offered: Whether the bot was offered a draw.
-        :param root_moves: If it is a list, the engine should only play a move that is in `root_moves`.
-        :return: The move to play.
-        """
-        if isinstance(time_limit.time, int):
-            my_time = time_limit.time
-            my_inc = 0
-        elif board.turn == chess.WHITE:
-            my_time = time_limit.white_clock if isinstance(time_limit.white_clock, int) else 0
-            my_inc = time_limit.white_inc if isinstance(time_limit.white_inc, int) else 0
-        else:
-            my_time = time_limit.black_clock if isinstance(time_limit.black_clock, int) else 0
-            my_inc = time_limit.black_inc if isinstance(time_limit.black_inc, int) else 0
-
-        possible_moves = root_moves if isinstance(root_moves, list) else list(board.legal_moves)
-
-        if my_time / 60 + my_inc > 10:
-            # Choose a random move.
-            move = random.choice(possible_moves)
-        else:
-            # Choose the first move alphabetically in uci representation.
-            possible_moves.sort(key=str)
-            move = possible_moves[0]
-        return PlayResult(move, None, draw_offered=draw_offered)
+        ponder_move = result.ponder if ponder else None
+        return PlayResult(move, ponder_move, info=info, draw_offered=draw_offered)

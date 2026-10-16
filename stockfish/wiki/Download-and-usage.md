@@ -4,9 +4,10 @@
 
 1. [**Download Stockfish**](#official-downloads) from the official page.  
     Stockfish is completely free.
-2. [**Download a GUI**](#download-a-chess-gui).  
-    A GUI (Graphical User Interface) is needed to conveniently use Stockfish; both free and commercial GUIs exist. Some GUIs provide an opening explorer or automatic game analysis.
-3. [**Install Stockfish into the GUI**](#install-in-a-chess-gui).  
+2. [**Download a GUI**](#download-a-chess-gui)  
+    A GUI (Graphical User Interface) is needed to conveniently use Stockfish; both free and commercial GUIs exist.  
+    Some GUIs provide an opening explorer or automatic game analysis.
+3. [**Install Stockfish into the GUI**](#install-in-a-chess-gui)  
    See that guide for several GUIs; if your GUI isn't listed, follow its manual.
 4. [**Configure Stockfish**](#change-settings) settings  
     Check out our [FAQ](Stockfish-FAQ#optimal-settings) for recommended settings.
@@ -24,38 +25,11 @@
 
 - https://github.com/official-stockfish/Stockfish/releases?q=prerelease%3Atrue
 
-> [!NOTE]
-> We **only** recommend downloading from the [official GitHub releases](https://github.com/official-stockfish/Stockfish/releases?q=prerelease%3Atrue).  
-> Websites such as Abrok are third parties, so we cannot guarantee the safety, reliability, and availability of those binaries because we are not responsible for them.
-
-### Choose a binary
-
-In order of preference:
-1. `x86-64-avx512icl`
-   - Intel: 10th Gen Mobile Core (Ice Lake) and 11th Gen Core (Rocket Lake).
-   - AMD: Ryzen 7000 series (Zen 4) and newer.
-2. `x86-64-vnni512`
-3. `x86-64-avx512`
-   - Intel: Core i9 X-series (Skylake-X and Cascade Lake-X).
-4. `x86-64-avxvnni`
-   - Intel: 12th Gen Core (Alder Lake) and newer.
-5. `x86-64-bmi2`
-   - Intel: 4th Gen Core (Haswell) and newer.
-   - AMD: Ryzen 5000 series (Zen 3).
-6. `x86-64-avx2`
-   - Intel: 4th Gen Core (Haswell) and newer.
-   - AMD: Excavator, Ryzen 1000 (Zen), 2000 (Zen+), and 3000 (Zen 2) series.
-7. `x86-64-sse41-popcnt`
-   - Intel: (2008+). 1st to 3rd Gen Core.
-   - AMD: (2011+). Bulldozer, Piledriver, and Steamroller (FX series).
-8. `x86-64`
-   - Any 64-bit capable processor but offers the least performance.
-
 ---
 
 ## Download a Chess GUI
 
-A chess graphical user interface allows you to interact with the engine in a user-friendly way. Popular GUIs are:
+A chess graphical user interface allows you to interact with Stockfish in a user-friendly way. Popular GUIs, which can use Stockfish as an engine, are:
 
 ### Free
 
@@ -74,6 +48,8 @@ A chess graphical user interface allows you to interact with the engine in a use
 | [![][lucaschess]][lucaschess] | [![][scidvspc]][scidvspc] |
 | **[XBoard](https://www.gnu.org/software/xboard/#download)** ([source code](https://ftp.gnu.org/gnu/xboard/)) | **[jose](https://peteschaefer.github.io/jose/)** ([source code](https://github.com/peteschaefer/jose)) <br>[How to install Stockfish](#jose)  |
 | [![][xboard]][xboard] | ![jose](https://hrimfaxi.bitbucket.io/jose/images/shots/shot01.png) |
+| **[JFXChess](https://github.com/asdfjkl/jfxchess/releases)** ([source code](https://github.com/asdfjkl/jfxchess)) <br>[How to install Stockfish](#jfxchess)|  |
+| ![jfxchess](https://raw.githubusercontent.com/asdfjkl/jerry/master/jfxchess.png) |  |
 
 
 
@@ -164,6 +140,15 @@ Stockfish is already bundled with jose. To enable it for play and analysis do:
 2. select the 'Engine' tab
 3. select Stockfish in the list of engines
 4. below, you can edit all the engine parameters
+
+### jfxchess
+
+Stockfish is already bundled with jfxchess. To add another version of Stockfish select
+
+1. Menu `Engine` > `Engine Settings`
+2. click on `Add`
+3. select the `stockfish.exe` of your choice
+4. on `Edit Parameters` you can modify all uci engine parameters
 
 ---
 

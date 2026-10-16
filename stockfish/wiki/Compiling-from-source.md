@@ -29,6 +29,7 @@ clean                   > Clean up
 
 ```
 native                  > select the best architecture for the host processor (default)
+x86-64-universal        > x86 64-bit with automatic runtime selection of the best architecture
 x86-64-avx512icl        > x86 64-bit with minimum avx512 support of Intel Ice Lake or AMD Zen 4
 x86-64-vnni512          > x86 64-bit with vnni 512bit support
 x86-64-avx512           > x86 64-bit with avx512 support
@@ -115,6 +116,13 @@ make -j profile-build
 
 ## Windows
 
+### Overview
+
+1. Install MSYS2
+2. Install the necessary packages for your chosen compiler (GCC or Clang/LLVM)
+3. Navigate to the `src` folder of your Stockfish source code
+4. Build the executable with the appropriate `make` command
+
 <details><summary>About MSYS2 & MinGW-w64</summary>
 
 MSYS2 is a software distribution and building platform for Windows. It provides a Unix-like environment, a command line interface, and a software repository, making it easy to install software on Windows or build software on Windows with either the GCC compiler or the Clang/LLVM compiler and using the Microsoft Visual C++ Runtime (mvscrt, shipped with all Windows versions) or the newer Microsoft Universal C Runtime (ucrt, shipped by default starting with Windows 10).
@@ -151,18 +159,28 @@ winget install MSYS2.MSYS2
 2. The installer runs a `MSYS2 MSYS` shell as a last step. Update the core packages by typing and executing `pacman -Syuu`. When finished, close the `MSYS2 MSYS` shell.
 </details>
 
-With MSYS2 installed to `C:\msys64` your home directory will be `C:\msys64\home\<your_username>`. Note that within the MSYS2 shell, paths are written in Unix-like way:
-
-* Windows path: `C:\msys64`
-* Unix-like path: `/c/msys64`
-* Windows path: `C:\msys64\home`
-* Unix-like path: `/home` or `/c/msys64/home`
-
-> [!TIP]
-> You can also use `ls` to list the files and folders in a directory, similar to how you would use `dir` in Windows.
-
 ### GCC
 This works with all the Windows versions.
+
+1. Start the appropriate shell for your system:
+   - 64 bit Windows: `MSYS2 MinGW64` shell, `C:\msys64\mingw64.exe`
+   - 32 bit Windows: `MSYS2 MinGW x86` shell, `C:\msys64\mingw32.exe`
+2. Install the necessary packages:
+   ```bash
+   # For 64-bit
+   pacman -S --noconfirm --needed make mingw-w64-x86_64-gcc
+   # For 32-bit
+   # pacman -S --noconfirm --needed make mingw-w64-i686-gcc
+   ```
+3. Navigate to the `src` folder of your Stockfish source code
+4. Build the executable:
+   ```bash
+   make -j profile-build COMP=mingw
+   ```
+
+<details><summary>Alternative: Automated download and build scripts</summary>
+
+If you prefer to automate the entire process (downloading the source, removing old nets, building, and stripping), use the following steps:
 
 1. Using your favorite text editor, copy and paste the following bash script, calling it `makefish.sh`:
 
@@ -238,12 +256,27 @@ popd
 ```
 </details>
 
-2. Start a `MSYS2 MinGW64` shell (not a `MSYS2 MSYS` one), `C:\msys64\mingw64.exe`, or start a `MSYS2 MinGW x86` shell, `C:\msys64\mingw32.exe`, to build a 32 bit application.
-3. Navigate to wherever you saved the script (e.g. type and execute `cd '/d/Program Files/Stockfish'` to navigate to `D:\Program Files\Stockfish`).
+2. Start the appropriate shell (`MSYS2 MinGW64` or `MSYS2 MinGW x86`).
+3. Navigate to wherever you saved the script.
 4. Run the script by typing and executing `bash makefish.sh`.
+
+</details>
 
 ### Clang/LLVM
 With Windows version older than Windows 10 you could need to install the Microsoft Windows Universal C Runtime.
+
+1. Start a `MSYS2 MinGW Clang x64` shell, `C:\msys64\clang64.exe`.
+2. Install the necessary packages:
+   ```bash
+   pacman -S --noconfirm --needed make mingw-w64-clang-x86_64-clang
+   ```
+3. Navigate to the `src` folder of your Stockfish source code
+4. Build the executable:
+   ```bash
+   make -j profile-build COMP=clang
+   ```
+
+<details><summary>Alternative: Automated download and build script</summary>
 
 1. Using your favorite text editor, copy and paste the following bash script, calling it `makefish.sh`:
 
@@ -284,10 +317,14 @@ popd
 </details>
 
 2. Start a `MSYS2 MinGW Clang x64` shell, `C:\msys64\clang64.exe`.
-3. Navigate to wherever you saved the script (e.g. type and execute `cd '/d/Program Files/Stockfish'` to navigate to `D:\Program Files\Stockfish`).
+3. Navigate to wherever you saved the script.
 4. Run the script by typing and executing `bash makefish.sh`.
 
+</details>
+
 ### Microsoft Visual Studio
+
+<details><summary>Building with Visual Studio (Not officially supported)</summary>
 
 > [!CAUTION]
 > **Building Stockfish with Visual Studio is not officially supported.**
@@ -316,13 +353,21 @@ To create an optimized MSVC build, configure the following settings in the IDE.
 
 Local tests show builds with these settings have comparable speed to GCC builds.
 
+</details>
+
 ### Troubleshooting
+
+<details><summary>Windows Security / ASLR issues</summary>
 
 If this tutorial will not work on your pc, you may try to change the `Windows Security` settings in via `Windows Security` >> `App & Browser Control` >> `Exploit Protection Settings`:
  1. Try to turn off _"Force randomization for images (Mandatory ASLR)"_, if this not solve the problem then,
  2. Try to turn off also _"Randomize memory allocations (Bottom-up ASLR)"_ .
 
+</details>
+
 ### Using other MinGW-w64 with MSYS2
+
+<details><summary>Custom MinGW-w64 instructions</summary>
 
 To use with MSYS2 a MinGW-w64 built by other projects, simply follow these instructions (Windows 64 bit):
 1. Download another version of MinGW-w64, e.g. [MinGW-w64 (64-bit) GCC 8.1.0](https://www.msys2.org/), extract the *mingw64* folder renaming it to *mingw64-810*, copy the folder into *C:\msys64*, check to have the directory *C:\msys64\mingw64-810\bin*
@@ -385,6 +430,7 @@ else
   echo "folder error"
 fi
 ```
+</details>
 
 ---
 

@@ -9,3 +9,17 @@ lichess_bot_auto_logs/*
 *.log
 *.txt
 TEMP/*
+
+# engine build artifacts
+engine/*.dll
+engine/*.so
+engine/*.exe
+engine/*.o
+engine/net.bin
+
+# training data and per-epoch snapshots (too large for GitHub's 100 MB limit)
+evaluationModel/*.jsonl
+evaluationModel/nnue_lichess_[0-9]*.npz
+
+# prebuilt stockfish binary (over GitHub's 100 MB limit)
+stockfish/*.exe

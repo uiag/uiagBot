@@ -1,0 +1,25 @@
+# mates: positions where the referee engine finds one clearly best
+# move at depth 18 (MultiPV, at least 120 cp ahead of the
+# rest).  Regenerate or extend with:
+#   python testsuite/tools/make_suites.py mates --games N
+6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1; bm Ra8#; dm 1; id "mates.001";
+k7/8/1QK5/8/8/8/8/8 w - - 0 1; bm Qb7#; dm 1; id "mates.002";
+2bqkbn1/2pppp2/np2N3/r3P1p1/p2N2B1/5Q2/PPPPKPP1/RNB2r2 w - - 0 1; bm Qxf7+; dm 2; id "mates.003";
+4k3/8/4K3/8/8/8/8/5Q2 w - - 0 1; bm Qf7+ Kd6 Qf4; dm 2; id "mates.004";
+5rk1/pp4p1/8/3N1Q1p/6q1/8/P5PP/5RK1 w - - 0 1; bm Ne7+; dm 7; id "mates.005";
+Q7/p1p1q1pk/3p2rp/4n3/3bP3/7b/PP3PPK/R1B2R2 b - - 0 1; bm Bxg2; dm 4; id "mates.006";
+6k1/pp4p1/2p5/2bp4/8/P5Pb/1P3rrP/2BRRN1K b - - 0 1; bm Rg1+; dm 2; id "mates.007";
+2r3k1/p4p2/3Rp2p/1p2P1pK/8/1P4P1/P3Q2P/1q6 b - - 0 1; bm Qg6+; dm 3; id "mates.008";
+8/2q2pk1/p2b3p/2P4P/5Q2/7b/5P2/5RK1 b - - 0 36; bm Bxf4; dm 6; id "mates.009";
+6k1/5p2/p2b3p/7q/8/6Qb/5P2/4R1K1 b - - 3 39; bm Bxg3; dm 7; id "mates.010";
+8/6k1/8/3b1p2/p7/4K2p/7b/8 b - - 1 63; bm Be5; dm 7; id "mates.011";
+8/6k1/3b4/5p2/4b3/8/p3K3/7q b - - 1 69; bm a1=Q Qh2+; dm 2; id "mates.012";
+8/6k1/3b4/8/4bp2/8/p1q5/4K3 b - - 3 72; bm a1=R# a1=Q#; dm 1; id "mates.013";
+r4rk1/3n1p1p/2p3p1/p2p4/P1B4q/1R2P2P/Q1PPKNq1/8 b - - 2 23; bm Qhxf2+ Qgxf2+; dm 2; id "mates.014";
+r4rk1/3n1p1p/2p3p1/p2p4/P1B5/1R2P2P/QKPq2q1/8 b - - 1 26; bm Qxc2+; dm 2; id "mates.015";
+r1bk3r/pp3p1p/8/1qbpp3/3Nn3/1Q2KP2/PP4PP/RNB2B1R b - - 4 15; bm Bxd4#; dm 1; id "mates.016";
+5r1k/1RP1ppbp/1R6/2Pn2p1/P5P1/P2b3P/3P1P2/2B1qBK1 b - - 0 29; bm Qxf1+ Be5 Nf4; dm 3; id "mates.017";
+2B2r1k/1R2pp1p/1n6/2P1b1p1/P4PP1/P2b3P/3P3K/2B2q2 b - - 0 32; bm Bxf4#; dm 1; id "mates.018";
+5Q2/3k2p1/8/3Pp2p/1P1r4/PKRn4/8/5R2 w - - 13 77; bm Rf7#; dm 1; id "mates.019";
+6k1/5pp1/2Bp3p/4p3/1Nb1P3/4qP2/4N1PP/rQ2KR2 b - - 3 33; bm Rxb1# Qxe2#; dm 1; id "mates.020";
+3Q4/pk3p1p/1r6/3p2p1/3N4/1N2BB2/PP3K2/8 w - - 3 31; bm Nc5#; dm 1; id "mates.021";

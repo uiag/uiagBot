@@ -122,6 +122,7 @@ def upgrade_account(li: lichess.Lichess) -> bool:
 def watch_control_stream(control_queue: CONTROL_QUEUE_TYPE, li: lichess.Lichess) -> None:
     """Put the events in a queue."""
     error = None
+    reconnect_delay = seconds(1)
     while not terminated:
         try:
             response = li.get_event_stream()
@@ -132,6 +133,13 @@ def watch_control_stream(control_queue: CONTROL_QUEUE_TYPE, li: lichess.Lichess)
                     control_queue.put_nowait(event)
                 else:
                     control_queue.put_nowait({"type": "ping"})
+            reconnect_delay = seconds(1)
+        except (HTTPError, ReadTimeout, RemoteDisconnected, ChunkedEncodingError, RequestsConnectionError):
+            # A dropped or idle event stream is normal, so reconnect instead of restarting lichess-bot.
+            logger.debug(f"Event stream disconnected, reconnecting in {to_seconds(reconnect_delay)}s:\n"
+                         f"{traceback.format_exc()}")
+            time.sleep(to_seconds(reconnect_delay))
+            reconnect_delay = min(reconnect_delay * 2, seconds(60))
         except Exception:
             error = traceback.format_exc()
             break
@@ -727,9 +735,6 @@ def play_game(li: lichess.Lichess,
                                          fake_think_time(config, board, game))
                         time.sleep(to_seconds(delay))
                     elif is_game_over(game):
-                        if engine.bot.searchOnEnemyProcess.is_alive():
-                            engine.bot.searchOnEnemyProcess.kill()
-                        del engine.bot
                         tell_user_game_result(game, board)
                         engine.send_game_result(game, board)
                         conversation.send_message("player", goodbye)

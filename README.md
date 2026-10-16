@@ -15,6 +15,41 @@
 
 </div>
 
+## This bot's engine
+
+This copy of lichess-bot plays with its own engine instead of an external one.
+The engine is written in C and lives in [`engine/`](engine/README.md); it is
+loaded as a shared library by [`engine_core.py`](engine_core.py) and driven by
+the `MyEngine` class in [`homemade.py`](homemade.py). It needs no network
+access and no other engine — only the local Polyglot opening book that
+lichess-bot itself handles (`engine: polyglot:` in `config.yml`).
+
+```
+python engine/build.py       # compile (engine_core.py also does this on demand)
+engine/ce.exe                # the same engine as a standalone UCI engine
+```
+
+Engine settings go under `engine: homemade_options:` in `config.yml` (the
+`uci_options:` block below it applies to external UCI engines only, and is
+ignored by `MyEngine`):
+
+```yaml
+  homemade_options:
+    Hash: 256          # transposition table size in MB
+    Threads: 7         # search threads (Lazy SMP)
+    EvalMode: hce      # hce | nnue | blend
+```
+
+[`testsuite/`](testsuite/README.md) measures the engine: the standard
+benchmarks, and matches against a ladder of Stockfish strengths that produce an
+Elo estimate.
+
+```
+python testsuite/run.py selftest   # perft, mates, drawn endings, the clock
+python testsuite/run.py benchmarks # speed and tactics
+python testsuite/run.py elo        # play Stockfish until the rating settles
+```
+
 ## Overview
 
 [lichess-bot](https://github.com/lichess-bot-devs/lichess-bot) is a free bridge
