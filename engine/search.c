@@ -1,13 +1,18 @@
 /*
  * search.c -- iterative deepening PVS search.
  *
- * Features: aspiration windows, transposition table with bound flags,
- * quiescence search with SEE pruning, staged move ordering (TT move,
- * SEE-split captures with capture history, killers, counter move, main and
- * continuation history), null move pruning with verification, reverse
- * futility, razoring, ProbCut, futility and late move pruning, SEE pruning,
- * late move reductions, singular extensions, internal iterative reduction,
- * mate distance pruning, a pawn-structure correction history, and Lazy SMP.
+ * Features: aspiration windows centred on a running score average, a
+ * transposition table with bound flags, quiescence search with SEE pruning,
+ * staged move ordering (TT move, SEE-split captures with capture history,
+ * killers, counter move, main and continuation history), null move pruning
+ * with verification, reverse futility, razoring, ProbCut, futility and late
+ * move pruning, SEE pruning, late move reductions in 1/1024 of a ply,
+ * singular extensions up to triple, internal iterative reduction, mate
+ * distance pruning, upcoming-repetition detection, four correction histories,
+ * node-effort time management, and Lazy SMP with a vote over the threads.
+ *
+ * Every constant the search compares against lives in tune.h, so the margins
+ * can be measured and retuned without touching this file.
  */
 #include "ce.h"
 #include <stdio.h>
@@ -112,8 +117,21 @@ static void init_time(const SearchLimits *lim, int side, int ply) {
 /* tables                                                              */
 /* ------------------------------------------------------------------ */
 
-static int LmrQuiet[64][64];
-static int LmrNoisy[64][64];
+/* Reductions are held in 1/1024 of a ply: the window-dependent term below is
+ * a fraction of a ply and rounding it away costs most of its effect. */
+static int LmrQuiet1024[64][64];
+static int LmrNoisy1024[64][64];
+
+static void build_lmr_tables(void) {
+    for (int d = 1; d < 64; d++)
+        for (int m = 1; m < 64; m++) {
+            double lg = log((double)d) * log((double)m);
+            LmrQuiet1024[d][m] = (int)(1024.0 * lg / ((double)LmrQuietDiv / 100.0));
+            LmrNoisy1024[d][m] = (int)(1024.0 * lg / ((double)LmrNoisyDiv / 100.0));
+        }
+}
+
+void tune_changed(void) { build_lmr_tables(); eval_tune_changed(); }
 
 void search_init(void) {
     static int done = 0;
@@ -121,11 +139,7 @@ void search_init(void) {
     done = 1;
     eval_init();
     pos_init_zobrist();
-    for (int d = 1; d < 64; d++)
-        for (int m = 1; m < 64; m++) {
-            LmrQuiet[d][m] = (int)(0.80 + log((double)d) * log((double)m) / 2.25);
-            LmrNoisy[d][m] = (int)(-0.20 + log((double)d) * log((double)m) / 3.30);
-        }
+    build_lmr_tables();
 }
 
 /* ------------------------------------------------------------------ */
@@ -165,26 +179,64 @@ static int stat_bonus(int depth) {
     return b > 1500 ? 1500 : b;
 }
 
+/*
+ * Correction history.  Four keys over four subsets of the material: the
+ * static evaluation is wrong for structural reasons, and those reasons
+ * survive for as long as the structure does.  Summing several coarse views of
+ * the position is much steadier than one fine one, which is the whole point:
+ * a static evaluation that stops moving between iterations is a search whose
+ * score stops moving.
+ */
 static int corr_value(const Thread *th, const Position *pos) {
-    int v = th->pawnCorrHist[pos->side][pos->pawnKey & 16383];
-    return v / CORR_GRAIN;
+    int c = pos->side;
+    int pawn  = th->pawnCorrHist[c][pos->pawnKey & CORR_MASK];
+    int minor = th->minorCorrHist[c][pos->minorKey & CORR_MASK];
+    int major = th->majorCorrHist[c][pos->majorKey & CORR_MASK];
+    int npw   = th->nonPawnCorrHist[WHITE][c][pos->nonPawnKey[WHITE] & CORR_MASK];
+    int npb   = th->nonPawnCorrHist[BLACK][c][pos->nonPawnKey[BLACK] & CORR_MASK];
+
+    int v = CorrWPawn * pawn + CorrWMinor * minor + CorrWMajor * major
+          + CorrWNonPawn * (npw + npb);
+    return v / (256 * CORR_GRAIN);
 }
 
-static void corr_update(Thread *th, const Position *pos, int depth, int diff) {
-    int16_t *e = &th->pawnCorrHist[pos->side][pos->pawnKey & 16383];
-    int w = depth + 1;
-    if (w > 16) w = 16;
+static void corr_bump(int16_t *e, int w, int diff) {
     int newv = ((int)(*e) * (256 - w) + diff * CORR_GRAIN * w) / 256;
     if (newv > CORR_MAX) newv = CORR_MAX;
     if (newv < -CORR_MAX) newv = -CORR_MAX;
     *e = (int16_t)newv;
 }
 
+static void corr_update(Thread *th, const Position *pos, int depth, int diff) {
+    int c = pos->side;
+    int w = depth + 1;
+    if (w > 16) w = 16;
+    corr_bump(&th->pawnCorrHist[c][pos->pawnKey & CORR_MASK], w, diff);
+    corr_bump(&th->minorCorrHist[c][pos->minorKey & CORR_MASK], w, diff);
+    corr_bump(&th->majorCorrHist[c][pos->majorKey & CORR_MASK], w, diff);
+    corr_bump(&th->nonPawnCorrHist[WHITE][c][pos->nonPawnKey[WHITE] & CORR_MASK], w, diff);
+    corr_bump(&th->nonPawnCorrHist[BLACK][c][pos->nonPawnKey[BLACK] & CORR_MASK], w, diff);
+}
+
+/* Keep a corrected evaluation out of the mate and tablebase ranges, where the
+ * search reads an exact meaning into the number. */
+static inline int corrected_eval(const Thread *th, const Position *pos, int raw) {
+    int v = raw + corr_value(th, pos);
+    if (v > VALUE_TB_WIN - 1) v = VALUE_TB_WIN - 1;
+    if (v < -(VALUE_TB_WIN - 1)) v = -(VALUE_TB_WIN - 1);
+    return v;
+}
+
 static void update_cont_hist(SearchStack *ss, int pc, int to, int bonus) {
-    static const int Offsets[4] = { 1, 2, 4, 6 };
-    static const int Weights[4] = { 100, 75, 40, 30 };
-    for (int i = 0; i < 4; i++) {
+    /* Ply 3 was missing; it is worth less than its neighbours because the
+     * reply to the reply to our move is only loosely ours to shape, which is
+     * why it carries a quarter of the weight rather than a third. */
+    static const int Offsets[5] = { 1, 2, 3, 4, 6 };
+    static const int Weights[5] = { 100, 75, 25, 40, 30 };
+    for (int i = 0; i < 5; i++) {
         SearchStack *prev = ss - Offsets[i];
+        /* beyond two plies the line is not comparable when we are in check */
+        if (ss->inCheck && Offsets[i] > 2) break;
         if (prev->move == MOVE_NONE || prev->move == MOVE_NULL) continue;
         hist_bump(&prev->contHist[pc * 64 + to], bonus * Weights[i] / 100, HIST_MAX);
     }
@@ -243,6 +295,16 @@ static void update_capture_stats(Thread *th, const Position *pos, Move best, int
 }
 
 /* ------------------------------------------------------------------ */
+/* principal variation                                                 */
+/* ------------------------------------------------------------------ */
+
+static void update_pv(Move *pv, Move m, const Move *child) {
+    *pv++ = m;
+    while (*child != MOVE_NONE) *pv++ = *child++;
+    *pv = MOVE_NONE;
+}
+
+/* ------------------------------------------------------------------ */
 /* move picker                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -253,7 +315,7 @@ enum {
 enum {
     ST_TT, ST_GEN_NOISY, ST_GOOD_NOISY, ST_GEN_QUIET, ST_QUIET, ST_BAD_NOISY,
     ST_EV_TT, ST_EV_GEN, ST_EV_ALL,
-    ST_QS_TT, ST_QS_GEN, ST_QS_NOISY,
+    ST_QS_TT, ST_QS_GEN, ST_QS_NOISY, ST_QS_CHECK_GEN, ST_QS_CHECKS,
     ST_PC_TT, ST_PC_GEN, ST_PC_NOISY,
     ST_END
 };
@@ -265,6 +327,7 @@ typedef struct {
     Move ttMove;
     int stage;
     int skipQuiets;
+    int wantChecks;      /* quiescence: also try quiet moves that give check */
     int threshold;
     Move moves[MAX_MOVES];
     int scores[MAX_MOVES];
@@ -279,12 +342,13 @@ static int mp_tt_ok(const Position *pos, Move m) {
 }
 
 static void mp_init(MovePicker *mp, const Position *pos, Thread *th, SearchStack *ss,
-                    Move ttMove, int type, int threshold) {
+                    Move ttMove, int type, int threshold, int wantChecks) {
     mp->pos = pos;
     mp->th = th;
     mp->ss = ss;
     mp->size = mp->idx = mp->badSize = mp->badIdx = 0;
     mp->skipQuiets = 0;
+    mp->wantChecks = wantChecks;
     mp->threshold = threshold;
     mp->ttMove = mp_tt_ok(pos, ttMove) ? ttMove : MOVE_NONE;
 
@@ -464,6 +528,33 @@ static Move mp_next(MovePicker *mp) {
                 if (m == mp->ttMove) continue;
                 return m;
             }
+            mp->stage = ST_QS_CHECK_GEN;
+            /* fallthrough */
+        case ST_QS_CHECK_GEN:
+            if (!mp->wantChecks) { mp->stage = ST_END; return MOVE_NONE; }
+            /* A quiet move that gives check is the one quiet move quiescence
+             * cannot afford to ignore: it forces a reply, so the horizon is
+             * not where the evaluation says it is.  Only at the first ply,
+             * and only when it does not simply lose material. */
+            {
+                int n = gen_quiet(pos, mp->moves);
+                int k = 0;
+                for (int i = 0; i < n; i++) {
+                    Move q = mp->moves[i];
+                    if (q == mp->ttMove) continue;
+                    if (!pos_gives_check(pos, q)) continue;
+                    if (!pos_see_ge(pos, q, 0)) continue;
+                    mp->moves[k++] = q;
+                }
+                mp->size = k;
+                mp->idx = 0;
+                score_quiet(mp);
+            }
+            mp->stage = ST_QS_CHECKS;
+            /* fallthrough */
+        case ST_QS_CHECKS:
+            while (mp->idx < mp->size)
+                return pick_best(mp->moves, mp->scores, &mp->idx, mp->size);
             mp->stage = ST_END;
             return MOVE_NONE;
 
@@ -537,6 +628,7 @@ static int qsearch(Thread *th, SearchStack *ss, int alpha, int beta, int depth) 
 
     ss->inCheck = pos->checkers != 0;
     ss->moveCount = 0;
+    if (pvNode) (ss + 1)->pvLine[0] = MOVE_NONE;
 
     int found;
     TTEntry *tte = tt_probe(pos->key, &found);
@@ -555,8 +647,9 @@ static int qsearch(Thread *th, SearchStack *ss, int alpha, int beta, int depth) 
         bestScore = futilityBase = -VALUE_INFINITE;
         ss->staticEval = VALUE_NONE;
     } else {
-        rawEval = ttEval != VALUE_NONE ? ttEval : eval_position(pos);
-        bestScore = rawEval + corr_value(th, pos);
+        rawEval = ttEval != VALUE_NONE ? ttEval
+                                       : eval_position_window(pos, alpha, beta);
+        bestScore = corrected_eval(th, pos, rawEval);
         ss->staticEval = bestScore;
 
         if (ttScore != VALUE_NONE
@@ -570,11 +663,12 @@ static int qsearch(Thread *th, SearchStack *ss, int alpha, int beta, int depth) 
             return bestScore;
         }
         if (bestScore > alpha) alpha = bestScore;
-        futilityBase = bestScore + 180;
+        futilityBase = bestScore + QsFutilityMargin;
     }
 
     MovePicker mp;
-    mp_init(&mp, pos, th, ss, ttMove, MP_QSEARCH, 0);
+    mp_init(&mp, pos, th, ss, ttMove, MP_QSEARCH, 0,
+            QsChecks && depth == 0 && !ss->inCheck);
 
     Move bestMove = MOVE_NONE;
     Move m;
@@ -605,7 +699,7 @@ static int qsearch(Thread *th, SearchStack *ss, int alpha, int beta, int depth) 
                 }
             }
             /* don't search losing captures */
-            if (!pos_see_ge(pos, m, -75)) continue;
+            if (!pos_see_ge(pos, m, -QsSeeMargin)) continue;
         }
 
         ss->move = m;
@@ -624,6 +718,7 @@ static int qsearch(Thread *th, SearchStack *ss, int alpha, int beta, int depth) 
             bestScore = score;
             if (score > alpha) {
                 bestMove = m;
+                if (pvNode) update_pv(ss->pvLine, m, (ss + 1)->pvLine);
                 if (score >= beta) break;
                 alpha = score;
             }
@@ -656,6 +751,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
 
     ss->inCheck = pos->checkers != 0;
     ss->moveCount = 0;
+    if (pvNode) ss->pvLine[0] = MOVE_NONE;
     (ss + 1)->excluded = MOVE_NONE;
     (ss + 1)->doubleExt = ss->doubleExt;
     (ss + 2)->killers[0] = (ss + 2)->killers[1] = MOVE_NONE;
@@ -672,6 +768,16 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
         if (mdAlpha > alpha) alpha = mdAlpha;
         if (mdBeta < beta) beta = mdBeta;
         if (alpha >= beta) return alpha;
+
+        /* A draw is already on the table, so nothing below this node can be
+         * worth less than one.  Raising alpha here prunes the whole losing
+         * side of the tree -- and stops the engine walking into a repetition
+         * it could have avoided. */
+        if (UseCuckoo && !ss->excluded && pos->halfmove >= 3 && alpha < VALUE_DRAW
+            && pos_has_game_cycle(pos, ply)) {
+            alpha = VALUE_DRAW;
+            if (alpha >= beta) return alpha;
+        }
     }
 
     Move excluded = ss->excluded;
@@ -713,11 +819,11 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
     } else {
         if (found && ttEval != VALUE_NONE) rawEval = ttEval;
         else {
-            rawEval = eval_position(pos);
+            rawEval = eval_position_window(pos, alpha, beta);
             if (!found)
                 tt_store(tte, key, VALUE_NONE, rawEval, BOUND_NONE, -6, MOVE_NONE, ttPv);
         }
-        eval = ss->staticEval = rawEval + corr_value(th, pos);
+        eval = ss->staticEval = corrected_eval(th, pos, rawEval);
 
         /* trust a TT score over the static eval when it is a usable bound */
         if (ttScore != VALUE_NONE
@@ -734,14 +840,18 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
             improving = 1;
     }
 
-    if (!pvNode && !excluded && depth < 9 && eval < VALUE_TB_WIN) {
+    if (!pvNode && !excluded && depth < RfpMaxDepth && eval < VALUE_TB_WIN) {
         /* reverse futility / static null move */
-        if (eval - 85 * (depth - improving) >= beta && eval >= beta)
+        if (eval - RfpMargin * (depth - improving) >= beta && eval >= beta)
             return (eval + beta) / 2;
     }
 
-    /* razoring */
-    if (!pvNode && depth <= 6 && eval + 280 + 250 * depth < alpha) {
+    /* Razoring.  The margin used to grow linearly, which made it both far too
+     * wide to ever fire at depth 1 and too narrow to be safe at depth 6; the
+     * quadratic form is the one that matches how much a quiet move can
+     * plausibly be worth. */
+    if (!pvNode && !excluded && depth <= 6
+        && eval + RazorBase + RazorMult * depth * depth < alpha) {
         int v = qsearch(th, ss, alpha - 1, alpha, 0);
         if (v < alpha) return v;
     }
@@ -751,12 +861,13 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
         && (ss - 1)->move != MOVE_NULL
         && depth >= 3
         && eval >= beta
-        && ss->staticEval >= beta - 21 * depth + 330
+        && ss->staticEval >= beta - NmpMarginDepth * depth + NmpMargin
         && pos_non_pawn_pieces(pos, us) > 0
         && ply >= th->nmpMinPly
         && beta > VALUE_MATED_IN_MAX_PLY) {
 
-        int R = 4 + depth / 6 + ((eval - beta) / 200 < 3 ? (eval - beta) / 200 : 3);
+        int ediv = (eval - beta) / NmpEvalDiv;
+        int R = NmpBase + depth / NmpDepthDiv + (ediv < 3 ? ediv : 3);
         ss->move = MOVE_NULL;
         ss->movedPiece = NO_PIECE;
         ss->contHist = &th->contHist[NO_PIECE][0][0];
@@ -782,12 +893,12 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
     /* ProbCut */
     if (!pvNode && depth > 4 && !excluded
         && beta > VALUE_MATED_IN_MAX_PLY && beta < VALUE_TB_WIN) {
-        int probcutBeta = beta + 185 - 55 * improving;
+        int probcutBeta = beta + ProbcutMargin - ProbcutImproving * improving;
         if (!(found && ttDepth >= depth - 3 && ttScore != VALUE_NONE
               && ttScore < probcutBeta)) {
             MovePicker mp;
             mp_init(&mp, pos, th, ss, ttMove, MP_PROBCUT,
-                    probcutBeta - ss->staticEval);
+                    probcutBeta - ss->staticEval, 0);
             Move m;
             while ((m = mp_next(&mp)) != MOVE_NONE) {
                 if (m == excluded || !pos_legal(pos, m)) continue;
@@ -819,7 +930,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
 
 moves_loop:;
     MovePicker mp;
-    mp_init(&mp, pos, th, ss, ttMove, MP_MAIN, 0);
+    mp_init(&mp, pos, th, ss, ttMove, MP_MAIN, 0, 0);
 
     Move quiets[64], caps[32];
     int quietCount = 0, capCount = 0;
@@ -858,42 +969,49 @@ moves_loop:;
         if (!rootNode && bestScore > VALUE_MATED_IN_MAX_PLY
             && pos_non_pawn_pieces(pos, us) > 0) {
 
-            int r = capture ? LmrNoisy[depth < 63 ? depth : 63][moveCount < 63 ? moveCount : 63]
-                            : LmrQuiet[depth < 63 ? depth : 63][moveCount < 63 ? moveCount : 63];
-            int lmrDepth = newDepth - r + hist / 8000;
+            int pd = depth < 63 ? depth : 63;
+            int pm = moveCount < 63 ? moveCount : 63;
+            int r = (capture ? LmrNoisy1024[pd][pm] + LmrNoisyBase
+                             : LmrQuiet1024[pd][pm] + LmrQuietBase) / 1024;
+            int hd = hist * 1024 / LmrHistDiv;
+            if (hd > LmrHistMax) hd = LmrHistMax;
+            if (hd < -LmrHistMax) hd = -LmrHistMax;
+            int lmrDepth = newDepth - r + hd / 1024;
             if (lmrDepth < 0) lmrDepth = 0;
 
             if (!capture && !givesCheck) {
                 /* late move pruning */
-                if (moveCount >= (3 + depth * depth) / (2 - improving))
+                if (moveCount >= (LmpBase + depth * depth) / (2 - improving))
                     mp.skipQuiets = 1;
 
                 /* history pruning */
-                if (lmrDepth < 5 && hist < -3800 * depth)
+                if (lmrDepth < HistPruneDepth && hist < -HistPruneMult * depth)
                     continue;
 
                 /* futility pruning */
-                if (!ss->inCheck && lmrDepth < 9
-                    && ss->staticEval + 95 + 125 * lmrDepth <= alpha)
+                if (!ss->inCheck && lmrDepth < FutilityMaxDepth
+                    && ss->staticEval + FutilityBase + FutilityMult * lmrDepth <= alpha)
                     continue;
 
                 /* SEE pruning of quiets */
-                if (!pos_see_ge(pos, m, -24 * lmrDepth * lmrDepth))
+                if (!pos_see_ge(pos, m, -SeePruneQuiet * lmrDepth * lmrDepth))
                     continue;
             } else {
                 /* SEE pruning of captures */
-                if (!pos_see_ge(pos, m, -95 * depth))
+                if (!pos_see_ge(pos, m, -SeePruneNoisy * depth))
                     continue;
             }
         }
 
         /* ---- singular extension ---- */
-        if (!rootNode && depth >= 7 && m == ttMove && !excluded
+        if (!rootNode && depth >= SingularMinDepth && m == ttMove && !excluded
             && ttScore != VALUE_NONE && (ttBound & BOUND_LOWER)
             && ttDepth >= depth - 3
             && ttScore > VALUE_MATED_IN_MAX_PLY && ttScore < VALUE_TB_WIN) {
 
-            int singularBeta = ttScore - (56 + 79 * (ttPv && !pvNode)) * depth / 64;
+            int singularBeta = ttScore
+                             - (SingularMargin + SingularPvMargin * (ttPv && !pvNode))
+                               * depth / 64;
             int singularDepth = (depth - 1) / 2;
 
             ss->excluded = m;
@@ -905,8 +1023,15 @@ moves_loop:;
 
             if (v < singularBeta) {
                 extension = 1;
-                if (!pvNode && v < singularBeta - 80 && ss->doubleExt <= 8) {
+                if (!pvNode && v < singularBeta - SingularDouble && ss->doubleExt <= 8) {
                     extension = 2;
+                    /* The move is not merely the only one, it is the only one
+                     * by a wide margin and nothing else comes close: in a
+                     * non-PV, non-capture line that is nearly always a forced
+                     * sequence, so spend a third ply on it. */
+                    if (!ttCapture && v < singularBeta - SingularTriple
+                        && ss->doubleExt <= 5)
+                        extension = 3;
                     (ss + 1)->doubleExt = ss->doubleExt + 1;
                 }
             } else if (v >= beta && v > VALUE_MATED_IN_MAX_PLY && v < VALUE_TB_WIN) {
@@ -916,7 +1041,7 @@ moves_loop:;
             } else if (cutNode) {
                 extension = -1;
             }
-        } else if (givesCheck && depth > 8) {
+        } else if (givesCheck && depth > CheckExtDepth) {
             extension = 1;
         }
 
@@ -931,6 +1056,7 @@ moves_loop:;
         pos_do_move(pos, m);
         tt_prefetch(pos->key);
 
+        int64_t nodesBefore = rootNode ? th->nodes : 0;
         int score;
         int dIdx = depth < 63 ? depth : 63;
         int mIdx = moveCount < 63 ? moveCount : 63;
@@ -938,16 +1064,50 @@ moves_loop:;
         if (depth >= 2 && moveCount > 1 + 2 * rootNode
             && (!capture || cutNode || !ttPv)) {
 
-            int r = capture ? LmrNoisy[dIdx][mIdx] : LmrQuiet[dIdx][mIdx];
+            /* Reduction in 1/1024 ply.  The window term replaces the old flat
+             * "pvNode r--": a node searched with a window as wide as the root
+             * window is on the principal variation in all but name, while one
+             * searched with a null window is speculative and can be cut
+             * harder.  Interpolating between the two is worth more than the
+             * step function was. */
+            int r1024 = capture ? LmrNoisy1024[dIdx][mIdx] + LmrNoisyBase
+                                : LmrQuiet1024[dIdx][mIdx] + LmrQuietBase;
+            {
+                /* The root window has to be clamped before it is used as the
+                 * yardstick: a mate score opens it to infinity, and an
+                 * unclamped ratio then rounds to nothing at every node, which
+                 * silently takes the reduction relief away from the whole
+                 * principal variation exactly when it matters most. */
+                int rd = th->rootDelta;
+                if (rd < 16) rd = 16;
+                if (rd > LmrDeltaCap) rd = LmrDeltaCap;
+                int w = beta - alpha;
+                if (w > rd) w = rd;
+                r1024 -= w * LmrDeltaWeight / rd;
+            }
+
+            if (!capture) {
+                /* History told the search where to look; let it also say how
+                 * hard to look, but only within a couple of plies.  Before the
+                 * cap this term alone could move the reduction by seven plies,
+                 * which made the tree depend more on what had been searched
+                 * before than on the position. */
+                int h = hist * 1024 / LmrHistDiv;
+                if (h > LmrHistMax) h = LmrHistMax;
+                if (h < -LmrHistMax) h = -LmrHistMax;
+                r1024 -= h;
+            }
+
+            int r = r1024 / 1024;
             if (!improving) r++;
             if (cutNode) r += 2;
             if (ttPv) r--;
-            if (pvNode) r--;
             if (givesCheck) r--;
             if (ttCapture && !capture) r++;
             if (pos->checkers) r--;
-            if (!capture) r -= hist / 7000;
             if (mp.stage == ST_BAD_NOISY) r++;
+            /* a node whose children keep failing high is not worth a full look */
+            if ((ss + 1)->cutoffCnt > LmrCutoffCnt) r++;
 
             if (r < 0) r = 0;
             int d = newDepth - r;
@@ -957,7 +1117,8 @@ moves_loop:;
             score = -search_node(th, ss + 1, -(alpha + 1), -alpha, d, 1, 0);
 
             if (score > alpha && d < newDepth) {
-                int deeper = newDepth + (score > bestScore + 70 && newDepth < depth);
+                int deeper = newDepth
+                           + (score > bestScore + LmrDeeperMargin && newDepth < depth);
                 score = -search_node(th, ss + 1, -(alpha + 1), -alpha, deeper,
                                      !cutNode, 0);
                 if (!capture) {
@@ -974,6 +1135,7 @@ moves_loop:;
         }
 
         if (pvNode && (moveCount == 1 || score > alpha)) {
+            (ss + 1)->pvLine[0] = MOVE_NONE;
             score = -search_node(th, ss + 1, -beta, -alpha, newDepth, 0, 0);
         }
 
@@ -986,31 +1148,16 @@ moves_loop:;
             for (int i = 0; i < th->rootMoveCount; i++)
                 if (th->rootMoves[i].move == m) { rm = &th->rootMoves[i]; break; }
             if (rm) {
+                rm->effort += th->nodes - nodesBefore;
                 if (moveCount == 1 || score > alpha) {
                     rm->score = score;
                     rm->seldepth = th->selDepth;
                     rm->pv[0] = m;
-                    rm->pvLen = 1;
-                    /* collect the PV from the TT */
-                    Position *p = pos;
-                    Move line[MAX_PLY];
-                    int n = 0;
-                    pos_do_move(p, m);
-                    while (n < MAX_PLY - 2) {
-                        int f;
-                        TTEntry *e = tt_probe(p->key, &f);
-                        if (!f) break;
-                        Move pm = e->move;
-                        if (pm == MOVE_NONE || !pos_pseudo_legal(p, pm)
-                            || !pos_legal(p, pm)) break;
-                        if (pos_is_draw(p)) break;
-                        line[n++] = pm;
-                        pos_do_move(p, pm);
-                    }
-                    for (int i = n - 1; i >= 0; i--) pos_undo_move(p, line[i]);
-                    pos_undo_move(p, m);
-                    for (int i = 0; i < n; i++) rm->pv[1 + i] = line[i];
-                    rm->pvLen = 1 + n;
+                    int n = 1;
+                    for (const Move *q = (ss + 1)->pvLine;
+                         *q != MOVE_NONE && n < MAX_PLY; q++)
+                        rm->pv[n++] = *q;
+                    rm->pvLen = n;
                 } else {
                     rm->score = -VALUE_INFINITE;
                 }
@@ -1021,9 +1168,9 @@ moves_loop:;
             bestScore = score;
             if (score > alpha) {
                 bestMove = m;
-                if (pvNode && !rootNode) { /* pv is reconstructed from the TT */ }
+                if (pvNode && !rootNode) update_pv(ss->pvLine, m, (ss + 1)->pvLine);
                 if (score >= beta) {
-                    ss->cutoffCnt++;
+                    ss->cutoffCnt += 1 + (ttMove == MOVE_NONE);
                     break;
                 }
                 alpha = score;
@@ -1041,7 +1188,8 @@ moves_loop:;
 
     if (bestMove != MOVE_NONE) {
         if (!pos_is_capture(pos, bestMove))
-            update_quiet_stats(th, ss, pos, bestMove, depth + (bestScore > beta + 60),
+            update_quiet_stats(th, ss, pos, bestMove,
+                               depth + (bestScore > beta + QuietBonusMargin),
                                quiets, quietCount);
         update_capture_stats(th, pos, bestMove, depth, caps, capCount);
     } else if (!pos->checkers && (ss - 1)->move != MOVE_NONE
@@ -1071,11 +1219,20 @@ moves_loop:;
 /* iterative deepening                                                 */
 /* ------------------------------------------------------------------ */
 
+/* Everything that failed low this iteration carries score == -VALUE_INFINITE,
+ * so sorting on the score alone left the whole tail in whatever order the
+ * generator happened to produce.  Falling back on the previous iteration's
+ * score keeps the ordering the search had already earned. */
+static int root_move_less(const RootMove *a, const RootMove *b) {
+    if (a->score != b->score) return a->score < b->score;
+    return a->prevScore < b->prevScore;
+}
+
 static void sort_root_moves(Thread *th, int from) {
     for (int i = from + 1; i < th->rootMoveCount; i++) {
         RootMove tmp = th->rootMoves[i];
         int j = i;
-        while (j > from && th->rootMoves[j - 1].score < tmp.score) {
+        while (j > from && root_move_less(&th->rootMoves[j - 1], &tmp)) {
             th->rootMoves[j] = th->rootMoves[j - 1];
             j--;
         }
@@ -1134,19 +1291,17 @@ static void thread_search(Thread *th) {
     int lastBestScore = -VALUE_INFINITE;
     Move lastBestMove = MOVE_NONE;
     int stability = 0;
-
-    /* helper threads skip some depths so they diverge from the main thread */
-    static const int SkipSize[20]  = { 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5 };
-    static const int SkipPhase[20] = { 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5 };
+    int mateStable = 0;
 
     int maxDepth = Limits.depth > 0 ? Limits.depth : MAX_PLY - 8;
 
+    /* Every thread searches every depth.  The old scheme had the helpers skip
+     * depths on a fixed pattern, which is how Lazy SMP was first done but
+     * spends most of a helper thread on iterations the main thread has already
+     * finished; sharing one transposition table is enough to make the threads
+     * diverge, and each of them then contributes a full-depth opinion to the
+     * vote at the end. */
     for (int depth = 1; depth <= maxDepth && !g_stop; depth++) {
-        if (th->id > 0) {
-            int i = (th->id - 1) % 20;
-            if (((depth + SkipPhase[i]) / SkipSize[i]) % 2) continue;
-        }
-
         th->rootDepth = depth;
         for (int i = 0; i < th->rootMoveCount; i++)
             th->rootMoves[i].prevScore = th->rootMoves[i].score;
@@ -1154,9 +1309,9 @@ static void thread_search(Thread *th) {
         for (th->pvIdx = 0; th->pvIdx < multiPV && !g_stop; th->pvIdx++) {
             th->selDepth = 0;
 
-            int delta = 10 + (th->rootMoves[th->pvIdx].prevScore > -VALUE_INFINITE
-                              ? th->rootMoves[th->pvIdx].prevScore * th->rootMoves[th->pvIdx].prevScore / 16384 : 0);
-            int prev = th->rootMoves[th->pvIdx].prevScore;
+            int prev = th->rootMoves[th->pvIdx].avgScore;
+            int delta = AspInitDelta + (prev > -VALUE_INFINITE
+                                        ? prev * prev / AspScoreDiv : 0);
             int alpha = -VALUE_INFINITE, beta = VALUE_INFINITE;
             if (depth >= 4 && prev > -VALUE_INFINITE && prev < VALUE_INFINITE) {
                 alpha = prev - delta < -VALUE_INFINITE ? -VALUE_INFINITE : prev - delta;
@@ -1188,6 +1343,11 @@ static void thread_search(Thread *th) {
                 if (alpha >= beta) { alpha = -VALUE_INFINITE; beta = VALUE_INFINITE; }
             }
 
+            RootMove *cur = &th->rootMoves[th->pvIdx];
+            if (cur->score > -VALUE_INFINITE && cur->score < VALUE_INFINITE)
+                cur->avgScore = cur->avgScore == -VALUE_INFINITE
+                              ? cur->score : (2 * cur->score + cur->avgScore) / 3;
+
             if (th->id == 0 && g_showInfo && (!g_stop || th->pvIdx == 0))
                 print_info(th, depth, th->pvIdx);
         }
@@ -1217,6 +1377,15 @@ static void thread_search(Thread *th) {
             }
             if (th->rootMoveCount == 1) factor *= 0.35;
 
+            /* If nearly the whole tree went into the move we are about to
+             * play, there is little left to find out; if it went elsewhere,
+             * the root is still unsettled and deserves longer. */
+            if (th->nodes > 0) {
+                double effort = (double)th->rootMoves[0].effort / (double)th->nodes;
+                factor *= (double)TimeNodeEffort / 100.0 - 0.45 * effort;
+                if (factor < 0.2) factor = 0.2;
+            }
+
             if ((double)elapsed() > (double)OptimumTime * factor) g_stop = 1;
 
             /* A mate the finished iteration actually resolved is enough: it
@@ -1224,9 +1393,20 @@ static void thread_search(Thread *th) {
              * The bound has to be the depth itself -- allowing 2*(depth-2)
              * stopped on mates far beyond the horizon, and the engine then
              * announced (and played) a mate in 14 in a position where a mate
-             * in 7 was there to be found two plies deeper. */
-            if (score >= VALUE_MATE_IN_MAX_PLY
-                && VALUE_MATE - score <= depth) g_stop = 1;
+             * in 7 was there to be found two plies deeper.
+             *
+             * Finding a mate inside the horizon is not the same as finding the
+             * shortest one, though: reductions can hide a quicker mate behind
+             * a longer one.  Requiring the distance to survive one more
+             * iteration costs a few milliseconds and stops the engine
+             * announcing a mate in three with a mate in two on the board. */
+            if (score >= VALUE_MATE_IN_MAX_PLY) {
+                if (score == lastBestScore) mateStable++;
+                else mateStable = 0;
+                if (VALUE_MATE - score <= depth && mateStable >= 2) g_stop = 1;
+            } else {
+                mateStable = 0;
+            }
         }
         lastBestScore = score;
     }
@@ -1269,6 +1449,9 @@ void search_new_game(void) {
         memset(Threads[i]->contHist, 0, sizeof(Threads[i]->contHist));
         memset(Threads[i]->counterMove, 0, sizeof(Threads[i]->counterMove));
         memset(Threads[i]->pawnCorrHist, 0, sizeof(Threads[i]->pawnCorrHist));
+        memset(Threads[i]->minorCorrHist, 0, sizeof(Threads[i]->minorCorrHist));
+        memset(Threads[i]->majorCorrHist, 0, sizeof(Threads[i]->majorCorrHist));
+        memset(Threads[i]->nonPawnCorrHist, 0, sizeof(Threads[i]->nonPawnCorrHist));
     }
 }
 
@@ -1304,6 +1487,8 @@ void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *r
             th->rootMoves[j].move = rootList[j];
             th->rootMoves[j].score = -VALUE_INFINITE;
             th->rootMoves[j].prevScore = -VALUE_INFINITE;
+            th->rootMoves[j].avgScore = -VALUE_INFINITE;
+            th->rootMoves[j].effort = 0;
             th->rootMoves[j].seldepth = 0;
             th->rootMoves[j].pv[0] = rootList[j];
             th->rootMoves[j].pvLen = 1;
@@ -1342,18 +1527,59 @@ void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *r
 #endif
     }
 
-    /* pick the thread with the deepest completed search, score as tie-break */
+    /*
+     * Pick the move the threads agree on rather than the one found by
+     * whichever thread happened to finish deepest.  Each thread votes with a
+     * weight that grows with both its depth and how far its score is above
+     * the worst score any thread returned, so a deep thread and a confident
+     * thread both count, and a single outlier cannot decide the move.
+     */
     Thread *best = Threads[0];
-    for (int i = 1; i < g_threadCount; i++) {
-        Thread *th = Threads[i];
-        if (th->completedDepth == 0 || th->rootMoves[0].score == -VALUE_INFINITE)
-            continue;
-        int bScore = best->rootMoves[0].score, tScore = th->rootMoves[0].score;
-        int bDepth = best->completedDepth, tDepth = th->completedDepth;
-        if (tScore >= VALUE_MATE_IN_MAX_PLY && tScore > bScore) best = th;
-        else if (bScore < VALUE_MATE_IN_MAX_PLY
-                 && (tDepth > bDepth || (tDepth == bDepth && tScore > bScore)))
-            best = th;
+    if (g_threadCount > 1) {
+        int minScore = VALUE_INFINITE;
+        for (int i = 0; i < g_threadCount; i++) {
+            int sc = Threads[i]->rootMoves[0].score;
+            if (Threads[i]->completedDepth > 0 && sc > -VALUE_INFINITE && sc < minScore)
+                minScore = sc;
+        }
+        if (minScore == VALUE_INFINITE) minScore = 0;
+
+        int64_t votes[MAX_MOVES];
+        Move voted[MAX_MOVES];
+        int nVoted = 0;
+        for (int i = 0; i < g_threadCount; i++) {
+            Thread *th = Threads[i];
+            if (th->completedDepth == 0 || th->rootMoves[0].score == -VALUE_INFINITE)
+                continue;
+            Move m = th->rootMoves[0].move;
+            int64_t w = (int64_t)(th->rootMoves[0].score - minScore + 14)
+                      * (int64_t)th->completedDepth;
+            int k = 0;
+            while (k < nVoted && voted[k] != m) k++;
+            if (k == nVoted) { voted[nVoted] = m; votes[nVoted] = 0; nVoted++; }
+            votes[k] += w;
+        }
+
+        for (int i = 0; i < g_threadCount; i++) {
+            Thread *th = Threads[i];
+            if (th->completedDepth == 0 || th->rootMoves[0].score == -VALUE_INFINITE)
+                continue;
+            int bScore = best->rootMoves[0].score, tScore = th->rootMoves[0].score;
+            if (bScore >= VALUE_MATE_IN_MAX_PLY) {
+                /* announce the shortest mate anyone found */
+                if (tScore > bScore) best = th;
+            } else if (tScore >= VALUE_MATE_IN_MAX_PLY) {
+                best = th;
+            } else {
+                int bk = 0, tk = 0;
+                while (bk < nVoted && voted[bk] != best->rootMoves[0].move) bk++;
+                while (tk < nVoted && voted[tk] != th->rootMoves[0].move) tk++;
+                int64_t bv = bk < nVoted ? votes[bk] : -1;
+                int64_t tv = tk < nVoted ? votes[tk] : -1;
+                if (tv > bv || (tv == bv && th->completedDepth > best->completedDepth))
+                    best = th;
+            }
+        }
     }
 
     RootMove *rm = &best->rootMoves[0];

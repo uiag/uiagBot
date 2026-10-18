@@ -1,10 +1,19 @@
 /*
  * eval.c -- hand-crafted evaluation.
  *
- * Tapered mid/endgame evaluation with PeSTO piece-square tables plus
- * mobility, king safety, pawn structure (hashed), passed pawns, piece
- * placement terms, threats, space, and endgame scaling / specialised
- * endgame knowledge (KPK bitbase, KXK and KBNK mate guidance).
+ * Tapered mid/endgame evaluation with PeSTO piece-square tables plus material
+ * imbalance, mobility, king safety, pawn structure (hashed), passed and
+ * candidate passed pawns, piece placement terms, threats, space, and endgame
+ * scaling / specialised endgame knowledge (KPK bitbase, KXK and KBNK mate
+ * guidance, the textbook wrong-bishop and knight-with-a-rook-pawn draws).
+ *
+ * Material and position are accumulated separately and only combined at the
+ * end, weighted by PosWeightMg / PosWeightEg.  The piece values and the
+ * tables come from PeSTO, where a pawn is 82 mg / 94 eg, while every other
+ * term here was taken from an evaluation whose pawn was about 126 mg /
+ * 208 eg; added at face value the positional terms arrive half again too
+ * large in the middlegame and more than twice too large in the endgame, which
+ * is what made the engine pay a pawn for half a pawn of position.
  *
  * Returned score is always from the side-to-move's point of view.
  */
@@ -131,8 +140,46 @@ static const int PestoEg[6][64] = {
   -53, -34, -21, -11, -28, -14, -24, -43 }
 };
 
+static void eval_imbalance(const Position *pos, int *mg, int *eg);
+static int scale_factor(const Position *pos, int strongSide, int eg);
+
+/*
+ * The tail every path through the evaluation shares: the tempo (inside the
+ * taper, because in a dead endgame the right to move is worth nothing), the
+ * endgame scale factor, the fifty-move damping, and the output scale that
+ * makes 100 mean a pawn.  Kept in one place so the lazy exit and the full
+ * evaluation cannot disagree about it.
+ */
+static int taper(const Position *pos, int mg, int eg, int phase) {
+    int tempo = pos->side == WHITE ? TempoBonus : -TempoBonus;
+    mg += tempo;
+    eg += tempo;
+
+    int strongSide = eg > 0 ? WHITE : BLACK;
+    int sf = scale_factor(pos, strongSide, eg);
+
+    int v = (mg * phase + eg * (24 - phase) * sf / 64) / 24;
+    v = v * (200 - pos->halfmove) / 200;
+    v = v * EvalScale / 100;
+    return pos->side == WHITE ? v : -v;
+}
+
 static int PsqMg[PIECE_NB][64];
 static int PsqEg[PIECE_NB][64];
+
+/* MatMul[phase][pieceType]: per-mille multiplier on the tabulated value */
+static int MatMul[2][PIECE_TYPE_NB];
+
+static void refresh_material_multipliers(void) {
+    MatMul[0][PAWN]   = MatPawnMg;   MatMul[1][PAWN]   = MatPawnEg;
+    MatMul[0][KNIGHT] = MatKnightMg; MatMul[1][KNIGHT] = MatKnightEg;
+    MatMul[0][BISHOP] = MatBishopMg; MatMul[1][BISHOP] = MatBishopEg;
+    MatMul[0][ROOK]   = MatRookMg;   MatMul[1][ROOK]   = MatRookEg;
+    MatMul[0][QUEEN]  = MatQueenMg;  MatMul[1][QUEEN]  = MatQueenEg;
+    MatMul[0][KING]   = 1000;        MatMul[1][KING]   = 1000;
+}
+
+void eval_tune_changed(void) { refresh_material_multipliers(); }
 
 /* ---------------- tuning constants ---------------- */
 
@@ -183,9 +230,6 @@ static const int ConnectedSeed[8] = { 0, 7, 8, 12, 29, 48, 86, 0 };
 #define DOUBLED_EG    56
 #define WEAK_UNOPPOSED_MG 13
 #define WEAK_UNOPPOSED_EG 27
-#define BISHOP_PAIR_MG  30
-#define BISHOP_PAIR_EG  50
-#define TEMPO_BONUS     28
 
 /* ---------------- pawn hash table (per thread) ----------------
  *
@@ -335,6 +379,8 @@ void eval_init(void) {
             PsqEg[make_piece(BLACK, pt)][sq] = PieceValueEg[pt] + PestoEg[pt][sq];
         }
 
+    refresh_material_multipliers();
+
     CenterFiles = FileBB[2] | FileBB[3] | FileBB[4] | FileBB[5];
     QueenSideBB = FileBB[0] | FileBB[1] | FileBB[2] | FileBB[3];
     KingSideBB  = FileBB[4] | FileBB[5] | FileBB[6] | FileBB[7];
@@ -442,6 +488,20 @@ static PawnEntry *pawn_eval(const Position *pos) {
             if (doubled && !support) {
                 e->mg -= sign * DOUBLED_MG;
                 e->eg -= sign * DOUBLED_EG;
+            }
+
+            /* A candidate passer: not passed yet, but on the files ahead we
+             * have at least as many pawns as they do, so a push wins the
+             * race.  Nothing credited these at all before, which made the
+             * evaluation blind to the whole plan of creating a passer. */
+            if (!passed && !opposed && r >= 2) {
+                U64 ahead = PassedPawnSpan[us][sq];
+                int helpers = popcount(ourPawns & ahead & AdjacentFilesBB[f]);
+                int stops   = popcount(theirPawns & ahead);
+                if (helpers >= stops && stops > 0) {
+                    e->mg += sign * CandidatePasserMg * (r - 1) / 4;
+                    e->eg += sign * CandidatePasserEg * (r - 1) / 4;
+                }
             }
         }
         e->attacksSpan[us] = span;
@@ -562,16 +622,34 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
                 }
 
                 if (pt == BISHOP) {
-                    /* bad bishop: own pawns on the bishop's colour, worse if blocked */
+                    /* Bad bishop: own pawns on the bishop's colour.  It hurts
+                     * more when those pawns cannot move and when they sit in
+                     * the centre, where they block the long diagonals -- the
+                     * old form counted every blocked pawn anywhere on the
+                     * board, which is not what makes a bishop bad. */
                     U64 sameColor = (bb_of(sq) & DarkSquares) ? DarkSquares : ~DarkSquares;
-                    int blockedPawns = popcount(ei->blockedPawns[us]);
-                    int v = popcount(ourPawns & sameColor) * (1 + blockedPawns / 4);
+                    int blockedCentre = popcount(ei->blockedPawns[us] & CenterFiles);
+                    int unsupported = !(ei->pe->attacks[us] & bb_of(sq));
+                    int v = popcount(ourPawns & sameColor) * (unsupported + blockedCentre);
                     *mg -= sign * 3 * v; *eg -= sign * 7 * v;
 
                     /* bishop on a long diagonal that sees the centre */
                     if (popcount(bishop_attacks(sq, theirPawns | ourPawns)
                                  & (bb_of(27) | bb_of(28) | bb_of(35) | bb_of(36))) > 1) {
                         *mg += sign * 45; *eg += sign * 0;
+                    }
+
+                    /* A bishop that took the pawn on a7/h7 (a2/h2) and is now
+                     * shut in by an enemy pawn on b6/g6 has cost more than
+                     * the pawn was worth.  The evaluation could not see this
+                     * at all before, and the search only finds out once the
+                     * bishop is already lost. */
+                    if (TrappedBishop && rel_rank(us, sq) == 6
+                        && (file_of(sq) == 0 || file_of(sq) == 7)) {
+                        int esc = sq + (us == WHITE ? -8 : 8)
+                                     + (file_of(sq) == 0 ? 1 : -1);
+                        if (theirPawns & bb_of(esc))
+                            { *mg -= sign * TrappedBishop; *eg -= sign * TrappedBishop; }
                     }
                 } else {
                     /* knight on the rim already handled by the PSQT */
@@ -590,9 +668,29 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
                         *mg -= sign * 55; *eg -= sign * 11;
                     }
                 }
-                if (rel_rank(us, sq) == 6) { *mg += sign * 12; *eg += sign * 28; }
+                /* A rook on the seventh is only worth anything if there is
+                 * something there to attack: enemy pawns still on it, or an
+                 * enemy king cut off on the eighth. */
+                if (rel_rank(us, sq) == 6) {
+                    U64 seventh = us == WHITE ? RankBB[6] : RankBB[1];
+                    if (!RookOn7th
+                        || (theirPawns & seventh)
+                        || rel_rank(us, theirKing) == 7) {
+                        *mg += sign * 12; *eg += sign * 28;
+                    }
+                }
                 /* rook behind or in front of a passed pawn */
                 if (ForwardFileBB[us][sq] & ei->pe->passed[us]) { *mg += sign * 10; *eg += sign * 30; }
+                /* rooks defending each other along a clear line */
+                if (ConnectedRooks) {
+                    U64 others = pieces_cp(pos, us, ROOK) & ~bb_of(sq);
+                    while (others) {
+                        int o = pop_lsb(&others);
+                        if (o > sq && (LineBB[sq][o] & bb_of(o))
+                            && !(BetweenBB[sq][o] & pos->occ))
+                            *mg += sign * ConnectedRooks;
+                    }
+                }
             } else { /* QUEEN */
                 /* discovered-attack risk on the queen */
                 U64 queenPinners = 0;
@@ -658,8 +756,8 @@ static int eval_king_danger(const Position *pos, EvalInfo *ei, int us, int *mg, 
         shelterMg = best;
         shelterEg = bestEg;
     }
-    *mg += (us == WHITE ? 1 : -1) * shelterMg / 2;
-    *eg += (us == WHITE ? 1 : -1) * shelterEg / 2;
+    *mg += (us == WHITE ? 1 : -1) * shelterMg * ShelterWeight / 128;
+    *eg += (us == WHITE ? 1 : -1) * shelterEg * ShelterWeight / 128;
 
     /* --- king danger --- */
     U64 weak = ei->attackedBy[them][ALL]
@@ -701,8 +799,20 @@ static int eval_king_danger(const Position *pos, EvalInfo *ei, int us, int *mg, 
 
     if (danger > 100) {
         int sign = us == WHITE ? 1 : -1;
-        *mg -= sign * danger * danger / 4096;
-        *eg -= sign * danger / 16;
+        *mg -= sign * (danger * danger / 4096) * KingDangerWeight / 128;
+        *eg -= sign * (danger / 16) * KingDangerWeight / 128;
+    }
+
+    /* A king on a file with no pawn of its own is exposed to the heavy
+     * pieces whether or not they have arrived yet. */
+    if (KingOpenFile && rel_rank(us, ksq) <= 2) {
+        int f = file_of(ksq);
+        if (!(ourPawns & FileBB[f])) {
+            int sign = us == WHITE ? 1 : -1;
+            int v = (theirPawns & FileBB[f]) ? KingOpenFile / 2 : KingOpenFile;
+            if (pieces_cp(pos, them, ROOK) | pieces_cp(pos, them, QUEEN))
+                *mg -= sign * v;
+        }
     }
     return danger;
 }
@@ -739,7 +849,12 @@ static void eval_passed(const Position *pos, EvalInfo *ei, int us, int *mg, int 
                       : !(unsafeSquares & ~ei->attackedBy[us][ALL]) ? 30
                       : !(unsafeSquares & bb_of(blockSq)) ? 17 : 0;
                 if (defended == squaresToQueen) k += 5;
-                mgV += k * w; egV += k * w;
+                /* A clear path to promotion is an endgame asset; in the
+                 * middlegame the enemy still has the pieces to deal with it,
+                 * and giving the same bonus to both was most of why the
+                 * engine would hand over a knight for two runners. */
+                mgV += k * w * PasserBlockMgWeight / 128;
+                egV += k * w * PasserBlockWeight / 128;
             }
         }
         mgV += PassedFileMg[file_of(sq)];
@@ -809,7 +924,8 @@ static void eval_threats(const Position *pos, EvalInfo *ei, int us, int *mg, int
 
 static void eval_space(const Position *pos, EvalInfo *ei, int us, int *mg) {
     int them = !us;
-    if (eval_material_simple(pos, WHITE) + eval_material_simple(pos, BLACK) < 3600) return;
+    if (eval_material_simple(pos, WHITE) + eval_material_simple(pos, BLACK)
+        < SpaceThreshold) return;
     U64 ourPawns = pieces_cp(pos, us, PAWN);
     U64 spaceMask = CenterFiles
         & (us == WHITE ? (RankBB[1] | RankBB[2] | RankBB[3]) : (RankBB[6] | RankBB[5] | RankBB[4]));
@@ -818,9 +934,60 @@ static void eval_space(const Position *pos, EvalInfo *ei, int us, int *mg) {
     behind |= pawn_push_bb(them, behind);
     behind |= pawn_push_bb(them, pawn_push_bb(them, behind));
     int bonus = popcount(safe) + popcount(behind & safe & ~ei->attackedBy[them][ALL]);
-    int weight = popcount(pos->byColor[us]) - 3
-               + (popcount(ei->blockedPawns[us]) < 2 ? 0 : 1);
+    /* Space is worth more the more pieces there are to use it and the more
+     * the pawns are locked; the old form collapsed the blocked-pawn count to
+     * a single bit and threw most of that away. */
+    int blocked = popcount(ei->blockedPawns[us]);
+    int weight = popcount(pos->byColor[us]) - 3 + (blocked < 9 ? blocked : 9);
     *mg += (us == WHITE ? 1 : -1) * bonus * weight * weight / 16;
+}
+
+/*
+ * Endgame knowledge that a scale factor cannot express: these are positions
+ * where the material count says one thing and the result is another, and no
+ * amount of tapering gets there.  Returns 1 and sets *sf when it recognises
+ * the position.
+ */
+static int known_endgame(const Position *pos, int strongSide, int *sf) {
+    int weakSide = !strongSide;
+    int npmS = eval_material_simple(pos, strongSide);
+    int npmW = eval_material_simple(pos, weakSide);
+    U64 ourPawns = pieces_cp(pos, strongSide, PAWN);
+    int weakKsq = lsb(pieces_cp(pos, weakSide, KING));
+
+    /* Only the bare-defence cases are decided here; once the weak side has a
+     * pawn of its own the position is a real game again. */
+    if (pieces_cp(pos, weakSide, PAWN)) return 0;
+
+    /* A bishop, pawns on one rook file only, and a bishop of the wrong
+     * colour for the promotion square: the defending king walks into the
+     * corner and cannot be moved.  A dead draw however many pawns there are. */
+    if (npmS == PieceValueMg[BISHOP] && npmW == 0 && ourPawns
+        && popcount(pieces_cp(pos, strongSide, BISHOP)) == 1) {
+        U64 edgeFile = (ourPawns & FileBB[0]) ? FileBB[0]
+                     : (ourPawns & FileBB[7]) ? FileBB[7] : 0;
+        if (edgeFile && !(ourPawns & ~edgeFile)) {
+            int f = (ourPawns & FileBB[0]) ? 0 : 7;
+            int promo = make_sq(f, strongSide == WHITE ? 7 : 0);
+            int bishopDark = (pieces_cp(pos, strongSide, BISHOP) & DarkSquares) != 0;
+            int promoDark = (bb_of(promo) & DarkSquares) != 0;
+            if (bishopDark != promoDark && SquareDistance[weakKsq][promo] <= 1) {
+                *sf = 0;
+                return 1;
+            }
+        }
+    }
+
+    /* A knight and a rook pawn with the defending king on the queening
+     * square is the other textbook draw the material count misses. */
+    if (npmS == PieceValueMg[KNIGHT] && npmW == 0
+        && popcount(ourPawns) == 1
+        && (ourPawns & (FileBB[0] | FileBB[7]))) {
+        int psq = lsb(ourPawns);
+        int promo = make_sq(file_of(psq), strongSide == WHITE ? 7 : 0);
+        if (SquareDistance[weakKsq][promo] <= 1) { *sf = 0; return 1; }
+    }
+    return 0;
 }
 
 /* Endgame scale factor out of 64. */
@@ -830,6 +997,8 @@ static int scale_factor(const Position *pos, int strongSide, int eg) {
     int npmS = eval_material_simple(pos, strongSide);
     int npmW = eval_material_simple(pos, weakSide);
     int pawnsS = popcount(pieces_cp(pos, strongSide, PAWN));
+
+    if (known_endgame(pos, strongSide, &sf)) return sf;
 
     /* opposite coloured bishops and nothing else */
     if (npmS == PieceValueMg[BISHOP] && npmW == PieceValueMg[BISHOP]
@@ -846,8 +1015,70 @@ static int scale_factor(const Position *pos, int strongSide, int eg) {
     } else if (pawnsS <= 2 && !popcount(pieces_cp(pos, weakSide, PAWN))) {
         sf = 37 + 7 * pawnsS;
     }
+
+    /* Pawns on one flank only are much harder to convert: the defender has a
+     * single front to hold and the attacking king has nowhere to break in. */
+    U64 strongPawns = pieces_cp(pos, strongSide, PAWN);
+    if (sf > 48 && strongPawns && npmS - npmW <= PieceValueMg[ROOK]
+        && (!(strongPawns & QueenSideBB) || !(strongPawns & KingSideBB)))
+        sf = sf * 7 / 8;
+
     (void)eg;
     return sf;
+}
+
+/*
+ * Material imbalance.  The piece-square tables price every piece as if the
+ * rest of the board did not exist, which is where "a knight for two pawns"
+ * came from: knights need pawns to stand on and rooks need them gone, a
+ * second rook adds less than the first, and two minors are worth more against
+ * a rook than their tabulated values say.
+ */
+static void eval_imbalance(const Position *pos, int *mg, int *eg) {
+    int minors[2], heavy[2];
+
+    for (int c = WHITE; c <= BLACK; c++) {
+        int sign = c == WHITE ? 1 : -1;
+        int pawns   = popcount(pieces_cp(pos, c, PAWN));
+        int knights = popcount(pieces_cp(pos, c, KNIGHT));
+        int bishops = popcount(pieces_cp(pos, c, BISHOP));
+        int rooks   = popcount(pieces_cp(pos, c, ROOK));
+        int queens  = popcount(pieces_cp(pos, c, QUEEN));
+        minors[c] = knights + bishops;
+        heavy[c]  = rooks + 2 * queens;
+
+        /* the pair is worth more the more open the position gets */
+        if (bishops >= 2) {
+            int extra = BishopPairPawns * (8 - pawns);
+            *mg += sign * (BishopPairMg + extra);
+            *eg += sign * (BishopPairEg + extra);
+        }
+
+        /* a knight is a short-range piece: it wants pawns to anchor to */
+        int pawnDelta = pawns - 5;
+        *mg += sign * ImbKnightPawns * knights * pawnDelta / 4;
+        *eg += sign * ImbKnightPawns * knights * pawnDelta / 4;
+        /* a rook wants the files open */
+        *mg -= sign * ImbRookPawns * rooks * pawnDelta / 4;
+        *eg -= sign * ImbRookPawns * rooks * pawnDelta / 4;
+
+        /* two rooks duplicate each other */
+        if (rooks >= 2) { *mg -= sign * ImbRookPair; *eg -= sign * ImbRookPair; }
+        /* a queen covers the squares a knight cannot and the other way round */
+        if (queens && knights) { *mg += sign * ImbQueenKnight; *eg += sign * ImbQueenKnight; }
+    }
+
+    /* Two minors against a rook (with or without a pawn alongside): the
+     * minors coordinate and the rook has nothing to attack yet. */
+    int minorDiff = minors[WHITE] - minors[BLACK];
+    int heavyDiff = heavy[WHITE] - heavy[BLACK];
+    if (minorDiff >= 2 && heavyDiff <= -1) {
+        *mg += ImbMinorVsRook;
+        *eg += ImbMinorVsRook / 2;
+    } else if (minorDiff <= -2 && heavyDiff >= 1) {
+        *mg -= ImbMinorVsRook;
+        *eg -= ImbMinorVsRook / 2;
+    }
 }
 
 /* Mate guidance for a lone king; returns 1 if it produced a score. */
@@ -927,11 +1158,25 @@ static int eval_lone_king(const Position *pos, int *out) {
     return 1;
 }
 
-int eval_hce(const Position *pos) {
+/*
+ * The window is only used by the lazy exit below; pass the full window to
+ * forbid it.
+ */
+int eval_hce_window(const Position *pos, int alpha, int beta) {
     EvalInfo ei;
     init_eval_info(pos, &ei);
 
-    int mg = 0, eg = 0;
+    /*
+     * Material and position are accumulated apart.  The piece values and the
+     * piece-square tables come from one source and everything else from
+     * another, whose pawn was half again as heavy in the middlegame and more
+     * than twice as heavy in the endgame; mixing them at face value is what
+     * made a pawn look like a fair price for a little mobility.  PosWeight*
+     * puts the two back on the same scale and gives the tuner one handle on
+     * the trade-off that matters most.
+     */
+    int matMg = 0, matEg = 0;
+    int posMg = 0, posEg = 0;
     int phase = 0;
     static const int PhaseWeight[6] = { 0, 1, 1, 2, 4, 0 };
 
@@ -939,73 +1184,126 @@ int eval_hce(const Position *pos) {
         int pc = pos->board[sq];
         if (pc == NO_PIECE) continue;
         int sign = piece_color(pc) == WHITE ? 1 : -1;
-        mg += sign * PsqMg[pc][sq];
-        eg += sign * PsqEg[pc][sq];
-        phase += PhaseWeight[piece_type(pc)];
+        int pt = piece_type(pc);
+        /* The piece value and its square bonus are priced separately so the
+         * tuner can move what a piece is worth without disturbing where it
+         * wants to stand. */
+        matMg += sign * (PieceValueMg[pt] * MatMul[0][pt] / 1000
+                         + PsqMg[pc][sq] - PieceValueMg[pt]);
+        matEg += sign * (PieceValueEg[pt] * MatMul[1][pt] / 1000
+                         + PsqEg[pc][sq] - PieceValueEg[pt]);
+        phase += PhaseWeight[pt];
     }
     if (phase > 24) phase = 24;
 
-    mg += ei.pe->mg;
-    eg += ei.pe->eg;
+    /* imbalance is a statement about material, so it is not rescaled */
+    eval_imbalance(pos, &matMg, &matEg);
 
-    for (int c = WHITE; c <= BLACK; c++) {
-        int sign = c == WHITE ? 1 : -1;
-        if (popcount(pieces_cp(pos, c, BISHOP)) >= 2) {
-            mg += sign * BISHOP_PAIR_MG;
-            eg += sign * BISHOP_PAIR_EG;
-        }
+    /*
+     * Lazy exit.  Material and the piece-square tables are the one pass over
+     * the board that has just happened; mobility, king safety, threats,
+     * passers and space together cost several times as much.  If the cheap
+     * half already puts the score outside the window the search asked about
+     * by more than the rest could possibly move it, stop here.
+     *
+     * This is an approximation with a visible cost: the value is cached in
+     * the transposition table like any other, so a later probe at a different
+     * window gets the estimate rather than the real thing.  LazyMargin = 0
+     * turns it off.
+     */
+    if (LazyMargin) {
+        int lazy = taper(pos, matMg, matEg, phase);
+        if (lazy - LazyMargin >= beta || lazy + LazyMargin <= alpha)
+            return lazy;
     }
 
-    eval_pieces(pos, &ei, WHITE, &mg, &eg);
-    eval_pieces(pos, &ei, BLACK, &mg, &eg);
+    /* Each block is accumulated on its own and weighted on its own. */
+    int gMg, gEg;
 
-    mg += ei.mobilityMg[WHITE] - ei.mobilityMg[BLACK];
-    eg += ei.mobilityEg[WHITE] - ei.mobilityEg[BLACK];
+    posMg += ei.pe->mg * PawnWeightMg / 128;
+    posEg += ei.pe->eg * PawnWeightEg / 128;
 
-    eval_king_danger(pos, &ei, WHITE, &mg, &eg);
-    eval_king_danger(pos, &ei, BLACK, &mg, &eg);
-    eval_passed(pos, &ei, WHITE, &mg, &eg);
-    eval_passed(pos, &ei, BLACK, &mg, &eg);
-    eval_threats(pos, &ei, WHITE, &mg, &eg);
-    eval_threats(pos, &ei, BLACK, &mg, &eg);
-    eval_space(pos, &ei, WHITE, &mg);
-    eval_space(pos, &ei, BLACK, &mg);
+    gMg = gEg = 0;
+    eval_pieces(pos, &ei, WHITE, &gMg, &gEg);
+    eval_pieces(pos, &ei, BLACK, &gMg, &gEg);
+    posMg += gMg * PieceWeightMg / 128;
+    posEg += gEg * PieceWeightEg / 128;
 
-    /* initiative: more pawns and pawns on both flanks favour the stronger side */
+    posMg += (ei.mobilityMg[WHITE] - ei.mobilityMg[BLACK]) * MobWeightMg / 128;
+    posEg += (ei.mobilityEg[WHITE] - ei.mobilityEg[BLACK]) * MobWeightEg / 128;
+
+    /* king safety carries its own weight inside eval_king_danger */
+    eval_king_danger(pos, &ei, WHITE, &posMg, &posEg);
+    eval_king_danger(pos, &ei, BLACK, &posMg, &posEg);
+
+    gMg = gEg = 0;
+    eval_passed(pos, &ei, WHITE, &gMg, &gEg);
+    eval_passed(pos, &ei, BLACK, &gMg, &gEg);
+    posMg += gMg * PassedWeightMg / 128;
+    posEg += gEg * PassedWeightEg / 128;
+
+    gMg = gEg = 0;
+    eval_threats(pos, &ei, WHITE, &gMg, &gEg);
+    eval_threats(pos, &ei, BLACK, &gMg, &gEg);
+    posMg += gMg * ThreatWeightMg / 128;
+    posEg += gEg * ThreatWeightEg / 128;
+
+    gMg = 0;
+    eval_space(pos, &ei, WHITE, &gMg);
+    eval_space(pos, &ei, BLACK, &gMg);
+    posMg += gMg * SpaceWeight / 128;
+
+    int mg = matMg + posMg * PosWeightMg / 128;
+    int eg = matEg + posEg * PosWeightEg / 128;
+
+    /*
+     * Initiative.  An endgame with pawns on both wings and kings that can
+     * infiltrate is worth more to whoever is already ahead.  The term used to
+     * be unbounded and unscaled, so in any position with a full set of pawns
+     * it added about 1.2 pawns to the endgame score the moment that score was
+     * off zero by a single centipawn -- which is exactly why the evaluation
+     * read either 0.0 or 1.2 and very little in between.  It is now converted
+     * to this evaluation's units and capped.
+     */
     {
-        int outflanking = 0;
         int wk = lsb(pieces_cp(pos, WHITE, KING)), bk = lsb(pieces_cp(pos, BLACK, KING));
-        outflanking = (file_of(wk) - file_of(bk)) + (rank_of(wk) - rank_of(bk));
+        int outflanking = (file_of(wk) - file_of(bk)) + (rank_of(wk) - rank_of(bk));
         if (outflanking < 0) outflanking = -outflanking;
         int pawnCount = popcount(pos->byType[PAWN]);
+        int passedCount = popcount(ei.pe->passed[WHITE] | ei.pe->passed[BLACK]);
         int bothFlanks = (pos->byType[PAWN] & QueenSideBB) && (pos->byType[PAWN] & KingSideBB);
-        int almostUnwinnable = !pawnCount && outflanking < 2;
         int infiltration = rank_of(wk) > 3 || rank_of(bk) < 4;
-        int complexity = 9 * pawnCount + 12 * outflanking + 9 * infiltration
-                       + 21 * bothFlanks - 100 * almostUnwinnable - 43;
+        /* no passers, no space to outflank and everything on one wing: there
+         * is nothing here for either side to play for */
+        int almostUnwinnable = !passedCount && outflanking == 0 && !bothFlanks;
+
+        int complexity = InitPawnWeight * pawnCount
+                       + InitPassedWeight * passedCount
+                       + InitOutflank * outflanking
+                       + InitInfiltration * infiltration
+                       + InitBothFlanks * bothFlanks
+                       - 100 * almostUnwinnable
+                       - InitConst;
+        complexity = complexity * 100 / InitiativeDiv;
+        if (complexity > InitiativeCap) complexity = InitiativeCap;
+
         int v = eg > 0 ? 1 : (eg < 0 ? -1 : 0);
         int absEg = eg < 0 ? -eg : eg;
-        int add = v * (complexity > -absEg ? complexity : -absEg);
-        eg += add;
+        eg += v * (complexity > -absEg ? complexity : -absEg);
     }
 
-    int strongSide = eg > 0 ? WHITE : BLACK;
-    int sf = scale_factor(pos, strongSide, eg);
-
-    int v = (mg * phase + eg * (24 - phase) * sf / 64) / 24;
-
-    /* damp towards a draw as the 50-move counter runs up */
-    v = v * (200 - pos->halfmove) / 200;
-
-    v += (pos->side == WHITE ? TEMPO_BONUS : -TEMPO_BONUS);
-
-    return pos->side == WHITE ? v : -v;
+    return taper(pos, mg, eg, phase);
 }
 
-int eval_position(Position *pos) {
+int eval_hce(const Position *pos) {
+    return eval_hce_window(pos, -VALUE_INFINITE, VALUE_INFINITE);
+}
+
+int eval_position_window(Position *pos, int alpha, int beta) {
     int v;
     if (pos_insufficient_material(pos)) return VALUE_DRAW;
     if (eval_lone_king(pos, &v)) {
+        v = v * EvalScale / 100;
         if (v > VALUE_TB_WIN - 1) v = VALUE_TB_WIN - 1;
         if (v < -(VALUE_TB_WIN - 1)) v = -(VALUE_TB_WIN - 1);
         return v;
@@ -1020,10 +1318,14 @@ int eval_position(Position *pos) {
         int n = nnue_evaluate(pos);
         v = (h * 3 + n) / 4;
     } else {
-        v = eval_hce(pos);
+        v = eval_hce_window(pos, alpha, beta);
     }
 
     if (v > VALUE_TB_WIN - 1) v = VALUE_TB_WIN - 1;
     if (v < -(VALUE_TB_WIN - 1)) v = -(VALUE_TB_WIN - 1);
     return v;
+}
+
+int eval_position(Position *pos) {
+    return eval_position_window(pos, -VALUE_INFINITE, VALUE_INFINITE);
 }

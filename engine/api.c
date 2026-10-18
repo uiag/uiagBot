@@ -11,11 +11,20 @@ static int g_hashMb = 64;
 
 #define START_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
-CE_EXPORT const char *ce_version(void) { return "ce 1.0"; }
+CE_EXPORT const char *ce_version(void) { return "ce 1.1"; }
+
+CE_EXPORT int ce_set_param(const char *name, int value) {
+    return tune_set(name, value);
+}
+
+CE_EXPORT int ce_get_param(const char *name, int *out) {
+    return tune_get(name, out);
+}
 
 CE_EXPORT int ce_init(const char *netPath, int hashMb, int threads) {
     bb_init();
     pos_init_zobrist();
+    tune_init();
     eval_init();
     search_init();
 

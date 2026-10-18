@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "tune.h"
+
 #ifdef _WIN32
 #define CE_EXPORT __declspec(dllexport)
 #else
@@ -149,12 +151,20 @@ static inline U64 pawn_attacks_bb(int c, U64 b) {
 typedef struct {
     U64  key;
     U64  pawnKey;
+    /* Keys over subsets of the material, used by the correction histories: a
+     * static evaluation is wrong for reasons that tend to persist while the
+     * pawns, or the minors, or the heavy pieces stay where they are, so each
+     * subset gets its own record of how wrong the evaluation has been. */
+    U64  nonPawnKey[COLOR_NB];
+    U64  minorKey;
+    U64  majorKey;
     U64  checkers;
     U64  blockersForKing[2];  /* own pieces shielding own king from a slider */
     U64  pinners[2];
     int  castling;
     int  ep;
     int  halfmove;
+    int  pliesFromNull;       /* plies since the last null move */
     int  captured;            /* piece code captured by the move leading here */
     int  eval;                /* cached static eval, or VALUE_NONE */
     Move move;                /* move that led to this state */
@@ -169,8 +179,12 @@ typedef struct {
     int castling;
     int ep;
     int halfmove;
+    int pliesFromNull;
     U64 key;
     U64 pawnKey;
+    U64 nonPawnKey[COLOR_NB];
+    U64 minorKey;
+    U64 majorKey;
     U64 checkers;
     U64 blockersForKing[2];
     U64 pinners[2];
@@ -205,6 +219,10 @@ int  pos_gives_check(const Position *pos, Move m);
 int  pos_see_ge(const Position *pos, Move m, int threshold);
 int  pos_is_draw(const Position *pos);
 int  pos_has_repeated(const Position *pos);
+/* Is there a move available here that walks into a position already seen?
+ * Such a move is worth at least a draw, which the search can claim without
+ * searching for it. */
+int  pos_has_game_cycle(const Position *pos, int ply);
 int  pos_insufficient_material(const Position *pos);
 int  pos_non_pawn_pieces(const Position *pos, int c);
 void pos_update_state(Position *pos);
@@ -235,8 +253,14 @@ enum { EVAL_HCE = 0, EVAL_NNUE = 1, EVAL_BLEND = 2 };
 extern int g_evalMode;
 
 void eval_init(void);
+void eval_tune_changed(void);   /* rebuild the tables derived from the tunables */
 int  eval_position(Position *pos);       /* from the side-to-move's point of view */
+/* As eval_position, but allowed to stop early and return a material-only
+ * estimate when that estimate is already outside [alpha, beta] by LazyMargin.
+ * Pass the search window; pass the full window to forbid the shortcut. */
+int  eval_position_window(Position *pos, int alpha, int beta);
 int  eval_hce(const Position *pos);
+int  eval_hce_window(const Position *pos, int alpha, int beta);
 int  eval_material_simple(const Position *pos, int c);
 extern const int PieceValueMg[PIECE_TYPE_NB];
 extern const int PieceValueEg[PIECE_TYPE_NB];
@@ -292,12 +316,21 @@ typedef struct {
     Move  excluded;
     Move  killers[2];
     int16_t *contHist;
+    /* the principal variation found below this node, MOVE_NONE terminated.
+     * Collected by the search itself: reading it back out of the transposition
+     * table gave a line that did not always belong to the score next to it. */
+    Move  pvLine[MAX_PLY + 1];
 } SearchStack;
 
 typedef struct {
     Move move;
     int  score;
     int  prevScore;
+    int64_t effort;            /* nodes spent below this move */
+    /* score smoothed over the completed iterations; the aspiration window is
+     * centred on this rather than on the last value, which keeps one noisy
+     * iteration from throwing the next one's window away */
+    int  avgScore;
     int  seldepth;
     Move pv[MAX_PLY + 2];
     int  pvLen;
@@ -323,7 +356,13 @@ typedef struct Thread {
     int16_t  captHist[PIECE_NB][64][PIECE_TYPE_NB];
     int16_t  contHist[PIECE_NB][64][PIECE_NB * 64];
     Move     counterMove[PIECE_NB][64];
-    int16_t  pawnCorrHist[COLOR_NB][16384];
+
+#define CORR_SIZE 16384
+#define CORR_MASK (CORR_SIZE - 1)
+    int16_t  pawnCorrHist[COLOR_NB][CORR_SIZE];
+    int16_t  minorCorrHist[COLOR_NB][CORR_SIZE];
+    int16_t  majorCorrHist[COLOR_NB][CORR_SIZE];
+    int16_t  nonPawnCorrHist[COLOR_NB][COLOR_NB][CORR_SIZE];
 } Thread;
 
 typedef struct {
@@ -360,6 +399,31 @@ void search_setup_threads(int n);
 void search_new_game(void);
 void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *res);
 int64_t now_ms(void);
+
+/* ------------------------------------------------------------------ */
+/* Tunable constants (tune.h / tune.c)                                 */
+/* ------------------------------------------------------------------ */
+
+#define DECLARE(name, def, lo, hi) extern int name;
+TUNE_LIST(DECLARE)
+#undef DECLARE
+
+typedef struct {
+    const char *name;
+    int *ptr;
+    int def, min, max;
+} TuneParam;
+
+const TuneParam *tune_params(void);
+int  tune_count(void);
+int  tune_set(const char *name, int value);
+int  tune_get(const char *name, int *out);
+void tune_print_uci_options(void);
+void tune_print_values(void);
+void tune_init(void);
+extern int g_showTuneOptions;
+/* called after any parameter changes: rebuilds the tables derived from them */
+void tune_changed(void);
 
 /* ------------------------------------------------------------------ */
 /* API / UCI                                                           */

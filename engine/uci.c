@@ -58,6 +58,7 @@ void uci_loop(void) {
             printf("option name Threads type spin default 1 min 1 max 64\n");
             printf("option name MultiPV type spin default 1 min 1 max 64\n");
             printf("option name EvalMode type combo default hce var hce var nnue var blend\n");
+            if (g_showTuneOptions) tune_print_uci_options();
             printf("uciok\n");
             fflush(stdout);
         } else if (starts_with(s, "isready")) {
@@ -73,6 +74,15 @@ void uci_loop(void) {
             if (name) {
                 name += 5;
                 if (value) { value += 6; }
+                /* `name` still has " value ..." after it, so the tune lookup
+                 * needs the bare word; copy it out first. */
+                if (value) {
+                    char word[64];
+                    int n = 0;
+                    while (name[n] && name[n] != ' ' && n < 63) { word[n] = name[n]; n++; }
+                    word[n] = 0;
+                    if (tune_set(word, atoi(value))) continue;
+                }
                 if (!strncmp(name, "Hash", 4) && value) ce_set_hash(atoi(value));
                 else if (!strncmp(name, "Threads", 7) && value) ce_set_threads(atoi(value));
                 else if (!strncmp(name, "MultiPV", 7) && value) ce_set_multipv(atoi(value));
@@ -151,6 +161,9 @@ void uci_loop(void) {
             if (dt < 1) dt = 1;
             printf("perft(%d) = %llu  in %lld ms  (%.2f Mnps)\n", d, n,
                    (long long)dt, (double)n / (double)dt / 1000.0);
+            fflush(stdout);
+        } else if (starts_with(s, "tune")) {
+            tune_print_values();
             fflush(stdout);
         } else if (starts_with(s, "eval")) {
             printf("eval %d cp (side to move)\n", ce_eval());

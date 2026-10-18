@@ -34,7 +34,7 @@ LIB_PATH = os.path.join(ENGINE_DIR, LIB_NAME)
 NET_PATH = os.path.join(ENGINE_DIR, "net.bin")
 
 C_SOURCES = ["bitboard.c", "position.c", "movegen.c", "eval.c", "nnue.c",
-             "tt.c", "search.c", "api.c", "uci.c", "ce.h"]
+             "tt.c", "tune.c", "search.c", "api.c", "uci.c", "ce.h", "tune.h"]
 
 EVAL_HCE, EVAL_NNUE, EVAL_BLEND = 0, 1, 2
 EVAL_MODES = {"hce": EVAL_HCE, "nnue": EVAL_NNUE, "blend": EVAL_BLEND}
@@ -71,6 +71,9 @@ int  ce_set_position(const char *fen, const char *moves);
 void ce_search(int64_t wtime, int64_t btime, int64_t winc, int64_t binc,
                int64_t movetime, int movestogo, int depth, int64_t nodes,
                int infinite, SearchResult *out);
+int  ce_eval(void);
+int  ce_set_param(const char *name, int value);
+int  ce_get_param(const char *name, int *out);
 """
 
 

@@ -33,7 +33,94 @@ project uses.
 | `ts/` | the implementation |
 | `suites/*.epd` | the test positions (generated, see below) |
 | `tools/make_suites.py` | regenerates `suites/` using a referee engine |
+| `tools/make_openings.py` | generates a large balanced opening book |
+| `tools/duel.py` | plays two builds against each other across processes |
+| `tools/make_evalset.py` | generates and labels positions for the evaluation tuner |
+| `tools/tune_eval.py` | fits the evaluation's parameters to that set |
+| `tools/spsa.py` | tunes search parameters by playing games |
+| `tools/ablate.py` | measures what each feature is worth by switching it off |
+| `tools/apply_tune.py` | writes accepted values back into `engine/tune.h` |
 | `results/` | JSON results, `history.jsonl`, and the games as PGN |
+
+## Comparing two builds quickly
+
+`run.py match -c N` runs its games as threads in one interpreter. The per-move
+protocol work is Python, so the global interpreter lock holds the whole thing
+to about 1.8x however many workers are asked for -- on eight cores, 56 games
+took three minutes whether `-c` was 4 or 7. `tools/duel.py` runs one *process*
+per worker over a disjoint slice of the opening book instead, and does about
+**200 games a minute** on the same machine:
+
+```
+python testsuite/tools/duel.py ce-cand --control -n 120      # do this first
+python testsuite/tools/duel.py ce-cand ce-prev -n 1200
+python testsuite/tools/duel.py ce-cand ce-base -n 2000 --sprt --elo1 4
+python testsuite/tools/duel.py "ce:FutilityBase=110" ce-prev -n 800
+```
+
+**`--control` first, every time.** It plays the candidate against itself, which
+on a fixed node count has to come out at exactly 50%, and it costs ninety
+seconds. The first version of this script did not force a thread count, so a
+`ce:...` candidate picked up `Threads = 6` from `[engine]` in `suite.toml`
+while the baseline opponent used one — and under a node limit that is a
+*handicap*, because the node budget is shared between the threads. It measured
+as **92 Elo against two identical binaries** and quietly spoiled three
+experiments, each of which produced a plausible-looking number and a tidy
+explanation for it. `duel.py` now forces `Threads` and `Hash` on both sides
+(`--threads`, `--hash`), and `--control` is there so the question gets asked
+before the result is believed rather than after it is surprising.
+
+The candidate and the baseline are names from `suite.toml`, optionally with
+`:Option=value` overrides, so a parameter change needs no rebuild. There are
+three frozen build slots to compare against -- `ce-base` (where this started),
+`ce-prev` (the last accepted step) and `ce-cand` (the snapshot under test) --
+which also means a rebuild cannot disturb a match already running.
+
+**A fixed-node control makes every game reproducible, and that puts a hard cap
+on how much a match can tell you: with the forty hand-picked openings there
+are only eighty distinct games to be had, and the 81st repeats the 1st
+exactly.** That is why `tools/make_openings.py` exists:
+
+```
+python testsuite/tools/make_openings.py -n 3000
+```
+
+It grows each line one ply at a time from the referee's best few moves, so the
+book wanders over real opening theory rather than over random legal moves, and
+keeps a position only if the referee still calls it balanced. `duel.py` picks
+up `suites/openings_big.epd` automatically when it is there.
+
+## Benchmarking a new build against the old one
+
+`engine/ce_new.exe` is a frozen copy of the current build and `engine/ce_base.exe`
+is the v1.0 build it replaces; both are configured in `suite.toml`, so the
+whole comparison is four commands:
+
+```
+python testsuite/run.py selftest --engine ce-new:Threads=1,Hash=64
+python testsuite/run.py benchmarks --engine ce-new:Threads=1,Hash=64
+python testsuite/tools/duel.py ce-new ce-base -n 2000 --tc nodes=25000
+python testsuite/tools/duel.py ce-new ce-base -n 400 --tc 10+0.1 -j 4 --no-adjudication
+```
+
+The first two check that nothing broke and give the speed and tactics numbers.
+The third measures strength with machine speed taken out of the equation --
+that is the number to quote when comparing two builds. The fourth repeats it on
+a real clock, which is the only way to catch a change that bought its accuracy
+with nodes per second, and `-j 4` keeps `jobs x 2` engines inside the core
+count so neither side is starved.
+
+`--no-adjudication` matters whenever the two builds disagree about what a
+centipawn means: the resign and draw thresholds are absolute, so a build whose
+scores are on a different scale resigns at a different point, and the result is
+biased. Use it for any comparison across an evaluation rescale.
+
+To measure against Stockfish rather than against yourself:
+
+```
+python testsuite/run.py match sf-2850 -n 20 --engine ce-new --tc 60+0.6
+python testsuite/run.py elo --engine ce-new
+```
 
 ## The benchmarks
 
@@ -212,9 +299,107 @@ already has a `ce-prev` opponent pointing at it — and then
 python testsuite/run.py sprt ce --engine ce-prev --elo1 5
 ```
 
+For anything more than a few hundred games prefer `tools/duel.py`: it makes the
+same comparison across processes and is about four times faster (see
+*Comparing two builds quickly* above).
+
 The first argument is always the candidate; `--engine` is the baseline it has
 to beat. `--engine`, `--config` and `--no-save` work on either side of the
 subcommand, so `run.py --engine ce-prev sprt ce` is the same command.
+
+## Tuning
+
+Everything in `engine/tune.h` can be set over UCI, so both tuners work on a
+stock binary and neither writes to the source.
+
+### The evaluation
+
+The evaluation is fitted to positions whose true value is known, which is far
+cheaper than measuring it in games: a pass over a hundred thousand positions
+takes a fraction of a second, because the engine is driven through its own
+shared library rather than over a pipe.
+
+```
+python testsuite/tools/make_evalset.py -n 240000     # self-play, result-labelled
+python testsuite/tools/tune_eval.py                  # fit, in groups
+python testsuite/tools/tune_eval.py --only PosWeightMg,PosWeightEg
+```
+
+The loss is the mean squared error between what the engine thinks of a
+position and what actually happened in it, with the engine's side mapped
+through a sigmoid into a winning probability, and with the global scale
+divided out so that the optimiser has to improve the *shape* of the
+evaluation rather than its confidence.
+
+**The label is the result of the game, not the referee's score, and that
+matters more here than anything else.** A referee score is far more precise,
+and fitting to it is a trap: the referee's number already contains a search, a
+static evaluation cannot reproduce one, and the fit pays down the unreachable
+part of the error by shrinking every weight towards zero. That really does
+improve the loss, because a flatter evaluation is better calibrated -- while
+destroying the discrimination that playing strength is made of. Measured on
+this engine: 51 parameters fitted to referee scores at depth 10 improved the
+held-back loss by 23% and then scored 38.75% over 1200 games, **-80 Elo**.
+`--label referee` is still there, because a precise label is right for
+anything that is not a static evaluation, but it is not the default.
+
+15% of the set is held back. If the held-back loss goes up while the training
+loss goes down, the fit is memorising the set and the run says so.
+
+A lower loss is evidence, not proof: always confirm with `duel.py`.
+
+### The search
+
+Pruning margins cannot be fitted to a position set -- nothing about a static
+evaluation says how deep to look -- so they are measured by playing:
+
+```
+python testsuite/tools/spsa.py --groups scaled --iters 500
+python testsuite/tools/spsa.py --groups lmr,pruning --iters 400
+python testsuite/tools/spsa.py --only SingularMargin,SingularDouble --iters 200
+```
+
+The `scaled` group is everything the search compares against a static
+evaluation. **Rescaling the evaluation changes what all of those margins mean
+at once**, so that group is the one to run after touching `PosWeight*`,
+`EvalScale` or the piece values -- it is where the systematic error will be,
+and it is small enough to resolve in an hour.
+
+Simultaneous perturbation nudges every parameter at once, both ways, plays a
+handful of games each way and moves them all a little towards whichever side
+scored. One iteration is nearly worthless; the average over a few hundred is
+not. Engines are started once per worker and kept alive with `setoption`
+between games, because at eight games an iteration process startup would
+otherwise be most of the cost.
+
+Both tuners end by printing the result as a `name=value` list ready to paste
+into `duel.py`, and write the same values to `results/tuned_*.txt`. Only once
+games agree should they become the defaults:
+
+```
+python testsuite/tools/duel.py "ce:PosWeightMg=54,..." ce-cand -n 1200
+python testsuite/tools/apply_tune.py testsuite/results/tuned_eval.txt
+python engine/build.py
+```
+
+`apply_tune.py` rewrites the defaults in `tune.h` in place, keeping the table's
+column layout, and leaves anything it was not asked about alone.
+
+### What each feature is worth
+
+Because almost everything is reachable through `tune.h`, a feature can be
+switched off on a stock binary and measured:
+
+```
+python testsuite/tools/ablate.py --list
+python testsuite/tools/ablate.py posweight corrhist imbalance
+python testsuite/tools/ablate.py -n 2000
+```
+
+Each entry plays the engine with one thing disabled against the engine with
+everything on, so a **negative** Elo is how much that feature is worth. One
+feature is usually worth less than the error bar on a thousand games -- read
+the small entries as a direction, not a measurement.
 
 ## The suite files
 

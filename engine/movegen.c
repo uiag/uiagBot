@@ -17,15 +17,22 @@
  * without a king and break everything downstream. */
 #define capturable(pos) (~(pos)->byColor[(pos)->side] & ~(pos)->byType[KING])
 
-static Move *emit_promos(Move *list, int from, int to) {
-    EMIT(make_promo(from, to, QUEEN));
+static Move *emit_under_promos(Move *list, int from, int to) {
     EMIT(make_promo(from, to, KNIGHT));
     EMIT(make_promo(from, to, ROOK));
     EMIT(make_promo(from, to, BISHOP));
     return list;
 }
 
-/* Captures and promotions. `target` limits destination squares (evasions). */
+/*
+ * Captures and promotions. `target` limits destination squares (evasions).
+ *
+ * A promotion that is also a capture keeps all four pieces here: it changes
+ * the material balance twice over and belongs in quiescence.  A promotion by
+ * a plain push only gets the queen; the three under-promotions are quiet
+ * moves, which keeps three dead moves per promotion-ready pawn out of every
+ * quiescence node without losing them from the move list.
+ */
 static Move *gen_pawn_noisy(const Position *pos, Move *list, U64 target) {
     int us = pos->side, them = !us;
     int up = us == WHITE ? 8 : -8;
@@ -37,15 +44,23 @@ static Move *gen_pawn_noisy(const Position *pos, Move *list, U64 target) {
     int dL = us == WHITE ? 7 : -9;
     int dR = us == WHITE ? 9 : -7;
 
-    /* promotion pushes */
+    /* promotion pushes: queen only, the rest are generated as quiet moves */
     if (onRank7) {
         U64 b = pawn_push_bb(us, onRank7) & ~pos->occ & target;
-        while (b) { int to = pop_lsb(&b); list = emit_promos(list, to - up, to); }
+        while (b) { int to = pop_lsb(&b); EMIT(make_promo(to - up, to, QUEEN)); }
 
         U64 capL = (us == WHITE ? (onRank7 & ~FileBB[0]) << 7 : (onRank7 & ~FileBB[0]) >> 9) & enemies;
         U64 capR = (us == WHITE ? (onRank7 & ~FileBB[7]) << 9 : (onRank7 & ~FileBB[7]) >> 7) & enemies;
-        while (capL) { int to = pop_lsb(&capL); list = emit_promos(list, to - dL, to); }
-        while (capR) { int to = pop_lsb(&capR); list = emit_promos(list, to - dR, to); }
+        while (capL) {
+            int to = pop_lsb(&capL);
+            EMIT(make_promo(to - dL, to, QUEEN));
+            list = emit_under_promos(list, to - dL, to);
+        }
+        while (capR) {
+            int to = pop_lsb(&capR);
+            EMIT(make_promo(to - dR, to, QUEEN));
+            list = emit_under_promos(list, to - dR, to);
+        }
     }
 
     U64 capL = (us == WHITE ? (rest & ~FileBB[0]) << 7 : (rest & ~FileBB[0]) >> 9) & enemies;
@@ -71,12 +86,19 @@ static Move *gen_pawn_quiet(const Position *pos, Move *list, U64 target) {
     U64 rank3 = us == WHITE ? RankBB[2] : RankBB[5];
     U64 empty = ~pos->occ;
     U64 rest = pawns & ~rank7;
+    U64 onRank7 = pawns & rank7;
 
     U64 b1 = pawn_push_bb(us, rest) & empty;
     U64 b2 = pawn_push_bb(us, b1 & rank3) & empty & target;
     b1 &= target;
     while (b1) { int to = pop_lsb(&b1); EMIT(make_move(to - up, to)); }
     while (b2) { int to = pop_lsb(&b2); EMIT(make_move(to - 2 * up, to)); }
+
+    /* the under-promotions gen_pawn_noisy left behind */
+    if (onRank7) {
+        U64 b = pawn_push_bb(us, onRank7) & empty & target;
+        while (b) { int to = pop_lsb(&b); list = emit_under_promos(list, to - up, to); }
+    }
     return list;
 }
 

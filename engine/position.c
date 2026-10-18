@@ -16,6 +16,44 @@ const int SeeValue[PIECE_TYPE_NB + 1] = { 100, 325, 335, 500, 975, 0, 0 };
 /* Rights that survive a piece leaving / entering a square. */
 static int CastlingRightsMask[64];
 
+/*
+ * Cuckoo table of reversible moves, used to notice that a draw by repetition
+ * is available without searching for it.  Each entry holds the zobrist delta a
+ * single reversible move makes, so XOR-ing the current key with the key of an
+ * earlier position tells us in one lookup whether one move would return there.
+ * Two hash functions and cuckoo insertion keep every entry findable in at
+ * most two probes.
+ */
+#define CUCKOO_SIZE 8192
+static U64  Cuckoo[CUCKOO_SIZE];
+static Move CuckooMove[CUCKOO_SIZE];
+
+static inline int cuckoo_h1(U64 k) { return (int)(k & (CUCKOO_SIZE - 1)); }
+static inline int cuckoo_h2(U64 k) { return (int)((k >> 16) & (CUCKOO_SIZE - 1)); }
+
+static void cuckoo_init(void) {
+    memset(Cuckoo, 0, sizeof(Cuckoo));
+    memset(CuckooMove, 0, sizeof(CuckooMove));
+    for (int pc = 0; pc < PIECE_NB; pc++) {
+        if (pc == NO_PIECE) continue;
+        int pt = piece_type(pc);
+        if (pt == PAWN) continue;              /* a pawn move is never reversible */
+        for (int s1 = 0; s1 < 64; s1++)
+            for (int s2 = s1 + 1; s2 < 64; s2++) {
+                if (!(attacks_bb(pt, s1, 0) & bb_of(s2))) continue;
+                Move move = make_move(s1, s2);
+                U64 key = ZobristPiece[pc][s1] ^ ZobristPiece[pc][s2] ^ ZobristSide;
+                int i = cuckoo_h1(key);
+                for (;;) {
+                    U64 tk = Cuckoo[i];   Cuckoo[i] = key;       key = tk;
+                    Move tm = CuckooMove[i]; CuckooMove[i] = move; move = tm;
+                    if (move == MOVE_NONE) break;
+                    i = (i == cuckoo_h1(key)) ? cuckoo_h2(key) : cuckoo_h1(key);
+                }
+            }
+    }
+}
+
 static U64 zrng_state = 0x9E3779B97F4A7C15ULL;
 static U64 zrng(void) {
     zrng_state ^= zrng_state >> 12;
@@ -36,6 +74,9 @@ void pos_init_zobrist(void) {
     for (int c = 0; c < 16; c++) ZobristCastling[c] = zrng();
     ZobristSide = zrng();
 
+    bb_init();
+    cuckoo_init();
+
     for (int sq = 0; sq < 64; sq++) CastlingRightsMask[sq] = 0;
     CastlingRightsMask[4]  = WHITE_OO | WHITE_OOO;   /* e1 */
     CastlingRightsMask[0]  = WHITE_OOO;              /* a1 */
@@ -49,6 +90,19 @@ void pos_init_zobrist(void) {
 /* piece placement                                                     */
 /* ------------------------------------------------------------------ */
 
+/* Fold one piece on one square into the material-subset keys.  A king counts
+ * as both a minor and a major piece: where it stands changes what both are
+ * worth. */
+static inline void toggle_subset_keys(Position *pos, int pc, int sq) {
+    int pt = piece_type(pc);
+    U64 z = ZobristPiece[pc][sq];
+    if (pt == PAWN) { pos->pawnKey ^= z; return; }
+    pos->nonPawnKey[piece_color(pc)] ^= z;
+    if (pt == KNIGHT || pt == BISHOP) pos->minorKey ^= z;
+    else if (pt == ROOK || pt == QUEEN) pos->majorKey ^= z;
+    else { pos->minorKey ^= z; pos->majorKey ^= z; }
+}
+
 static inline void put_piece(Position *pos, int pc, int sq) {
     U64 b = bb_of(sq);
     pos->board[sq] = (uint8_t)pc;
@@ -57,7 +111,7 @@ static inline void put_piece(Position *pos, int pc, int sq) {
     pos->occ |= b;
     pos->pieceCount[pc]++;
     pos->key ^= ZobristPiece[pc][sq];
-    if (piece_type(pc) == PAWN) pos->pawnKey ^= ZobristPiece[pc][sq];
+    toggle_subset_keys(pos, pc, sq);
 }
 
 static inline void remove_piece(Position *pos, int sq) {
@@ -69,7 +123,7 @@ static inline void remove_piece(Position *pos, int sq) {
     pos->occ ^= b;
     pos->pieceCount[pc]--;
     pos->key ^= ZobristPiece[pc][sq];
-    if (piece_type(pc) == PAWN) pos->pawnKey ^= ZobristPiece[pc][sq];
+    toggle_subset_keys(pos, pc, sq);
 }
 
 static inline void move_piece(Position *pos, int from, int to) {
@@ -81,8 +135,8 @@ static inline void move_piece(Position *pos, int from, int to) {
     pos->byColor[piece_color(pc)] ^= b;
     pos->occ ^= b;
     pos->key ^= ZobristPiece[pc][from] ^ ZobristPiece[pc][to];
-    if (piece_type(pc) == PAWN)
-        pos->pawnKey ^= ZobristPiece[pc][from] ^ ZobristPiece[pc][to];
+    toggle_subset_keys(pos, pc, from);
+    toggle_subset_keys(pos, pc, to);
 }
 
 /* ------------------------------------------------------------------ */
@@ -308,6 +362,7 @@ void pos_do_move(Position *pos, Move m) {
         pos->ep = SQ_NONE;
     }
     pos->halfmove++;
+    pos->pliesFromNull++;
 
     if (type == MT_CASTLE) {
         int rookFrom, rookTo;
@@ -358,9 +413,14 @@ void pos_do_move(Position *pos, Move m) {
 
     st->key = pos->key;
     st->pawnKey = pos->pawnKey;
+    st->nonPawnKey[WHITE] = pos->nonPawnKey[WHITE];
+    st->nonPawnKey[BLACK] = pos->nonPawnKey[BLACK];
+    st->minorKey = pos->minorKey;
+    st->majorKey = pos->majorKey;
     st->castling = pos->castling;
     st->ep = pos->ep;
     st->halfmove = pos->halfmove;
+    st->pliesFromNull = pos->pliesFromNull;
     st->captured = captured;
 
     pos_update_state(pos);
@@ -398,9 +458,14 @@ void pos_undo_move(Position *pos, Move m) {
     StateInfo *prev = &pos->st[pos->histCount];
     pos->key = prev->key;
     pos->pawnKey = prev->pawnKey;
+    pos->nonPawnKey[WHITE] = prev->nonPawnKey[WHITE];
+    pos->nonPawnKey[BLACK] = prev->nonPawnKey[BLACK];
+    pos->minorKey = prev->minorKey;
+    pos->majorKey = prev->majorKey;
     pos->castling = prev->castling;
     pos->ep = prev->ep;
     pos->halfmove = prev->halfmove;
+    pos->pliesFromNull = prev->pliesFromNull;
     pos->checkers = prev->checkers;
     pos->blockersForKing[0] = prev->blockersForKing[0];
     pos->blockersForKing[1] = prev->blockersForKing[1];
@@ -421,13 +486,19 @@ void pos_do_null(Position *pos) {
         pos->ep = SQ_NONE;
     }
     pos->halfmove++;
+    pos->pliesFromNull = 0;
     pos->side = !pos->side;
 
     st->key = pos->key;
     st->pawnKey = pos->pawnKey;
+    st->nonPawnKey[WHITE] = pos->nonPawnKey[WHITE];
+    st->nonPawnKey[BLACK] = pos->nonPawnKey[BLACK];
+    st->minorKey = pos->minorKey;
+    st->majorKey = pos->majorKey;
     st->castling = pos->castling;
     st->ep = pos->ep;
     st->halfmove = pos->halfmove;
+    st->pliesFromNull = pos->pliesFromNull;
 
     pos_update_state(pos);
 }
@@ -438,9 +509,14 @@ void pos_undo_null(Position *pos) {
     pos->side = !pos->side;
     pos->key = prev->key;
     pos->pawnKey = prev->pawnKey;
+    pos->nonPawnKey[WHITE] = prev->nonPawnKey[WHITE];
+    pos->nonPawnKey[BLACK] = prev->nonPawnKey[BLACK];
+    pos->minorKey = prev->minorKey;
+    pos->majorKey = prev->majorKey;
     pos->castling = prev->castling;
     pos->ep = prev->ep;
     pos->halfmove = prev->halfmove;
+    pos->pliesFromNull = prev->pliesFromNull;
     pos->checkers = prev->checkers;
     pos->blockersForKing[0] = prev->blockersForKing[0];
     pos->blockersForKing[1] = prev->blockersForKing[1];
@@ -484,6 +560,41 @@ int pos_is_draw(const Position *pos) {
             if (idx >= rootHist) return 1;
             if (++reps == 2) return 1;
         }
+    }
+    return 0;
+}
+
+/*
+ * True when some legal move from here reaches a position that already
+ * occurred.  Only cycles that lie entirely inside the search tree are
+ * reported: those are unambiguously worth a draw to the side to move.  A
+ * cycle that reaches back past the root may be one the opponent would have
+ * avoided, so it is left alone.
+ */
+int pos_has_game_cycle(const Position *pos, int ply) {
+    /* Walking back past a null move would compare positions with different
+     * sides to move, and past the start of the array would read rubbish. */
+    int end = pos->halfmove < pos->pliesFromNull ? pos->halfmove : pos->pliesFromNull;
+    if (end > pos->histCount) end = pos->histCount;
+    if (end < 3) return 0;
+
+    U64 originalKey = pos->key;
+    for (int i = 3; i <= end; i += 2) {
+        if (i > ply) break;              /* the cycle would leave the tree */
+        U64 moveKey = originalKey ^ pos->st[pos->histCount - i].key;
+        int j = cuckoo_h1(moveKey);
+        if (Cuckoo[j] != moveKey) {
+            j = cuckoo_h2(moveKey);
+            if (Cuckoo[j] != moveKey) continue;
+        }
+        Move m = CuckooMove[j];
+        int s1 = move_from(m), s2 = move_to(m);
+        /* the path has to be clear; the mover itself sits on one of the ends */
+        if ((BetweenBB[s1][s2] ^ bb_of(s2)) & pos->occ) continue;
+        int occupied = pos->board[s1] != NO_PIECE ? s1 : s2;
+        if (pos->board[occupied] == NO_PIECE) continue;
+        if (piece_color(pos->board[occupied]) != pos->side) continue;
+        return 1;
     }
     return 0;
 }
@@ -658,9 +769,14 @@ static int set_fen(Position *pos, const char *fen) {
     StateInfo *st = &pos->st[0];
     st->key = pos->key;
     st->pawnKey = pos->pawnKey;
+    st->nonPawnKey[WHITE] = pos->nonPawnKey[WHITE];
+    st->nonPawnKey[BLACK] = pos->nonPawnKey[BLACK];
+    st->minorKey = pos->minorKey;
+    st->majorKey = pos->majorKey;
     st->castling = pos->castling;
     st->ep = pos->ep;
     st->halfmove = pos->halfmove;
+    st->pliesFromNull = pos->pliesFromNull;
     st->captured = NO_PIECE;
     st->move = MOVE_NONE;
     st->eval = VALUE_NONE;

@@ -233,3 +233,44 @@ draw_after_ply = 100    # never adjudicate a draw before this ply
 resign_enabled = true
 resign_plies   = 6     # this many consecutive moves below resign_score
 resign_score   = 900   # centipawns, from the losing engine's own point of view
+
+# ---------------------------------------------------------- our own builds
+# Frozen copies of the engine, used to test a source change against the build
+# it replaces.  `ce-base` is the v1.0 build this work started from and never
+# moves; `ce-prev` is whatever the last accepted step produced.
+#
+#   python testsuite/run.py sprt ce --engine ce-prev --elo1 5
+#
+[[opponent]]
+name    = "ce-prev"
+command = "engine/ce_prev.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 64, Threads = 1, EvalMode = "hce" }
+note    = "unrated: the previous accepted build"
+
+[[opponent]]
+name    = "ce-base"
+command = "engine/ce_base.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 64, Threads = 1, EvalMode = "hce" }
+note    = "unrated: the v1.0 build, frozen"
+
+[[opponent]]
+name    = "ce-new"
+command = "engine/ce_new.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 64, Threads = 1, EvalMode = "hce" }
+note    = "unrated: the candidate build"
+
+# A snapshot of the build under test, so that editing and rebuilding the engine
+# cannot disturb a match that is already running.
+[[opponent]]
+name    = "ce-cand"
+command = "engine/ce_cand.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 64, Threads = 1, EvalMode = "hce" }
+note    = "unrated: frozen snapshot of the candidate"

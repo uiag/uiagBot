@@ -19,7 +19,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 SOURCES = ["bitboard.c", "position.c", "movegen.c", "eval.c", "nnue.c",
-           "tt.c", "search.c", "api.c", "uci.c"]
+           "tt.c", "tune.c", "search.c", "api.c", "uci.c"]
 MAIN = "main.c"
 
 GCC_CANDIDATES = [
