@@ -34,10 +34,23 @@ Engine settings go under `engine: homemade_options:` in `config.yml` (the
 ignored by `MyEngine`):
 
 ```yaml
+  ponder: true         # think on the opponent's clock
   homemade_options:
     Hash: 256          # transposition table size in MB
     Threads: 7         # search threads (Lazy SMP)
-    EvalMode: hce      # hce | nnue | blend
+    EvalMode: blend    # hce | nnue | blend; blend is the strongest
+```
+
+The evaluation network lives in [`nnue/`](nnue/README.md) — a perspective
+`(768 -> 1024) x 2 -> 1` net with SCReLU and output buckets, trained on the
+lichess evaluation dump, with the data pipeline and the checks that keep its
+incremental accumulator honest.
+
+```
+sh nnue/run_extract.sh 7                        # the dump -> training records
+.venv2/Scripts/python nnue/train.py --epochs 5  # train (needs torch + a GPU)
+.venv2/Scripts/python nnue/export.py            # -> engine/net2.bin
+python nnue/verify.py                           # the accumulator is correct
 ```
 
 [`testsuite/`](testsuite/README.md) measures the engine: the standard

@@ -31,7 +31,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.join(HERE, "engine")
 LIB_NAME = "ce.dll" if sys.platform == "win32" else "libce.so"
 LIB_PATH = os.path.join(ENGINE_DIR, LIB_NAME)
-NET_PATH = os.path.join(ENGINE_DIR, "net.bin")
+# The perspective network built by nnue/.  The old single-perspective
+# 769-256-1 net.bin is no longer a format the engine reads.
+NET_PATH = os.path.join(ENGINE_DIR, "net2.bin")
 
 C_SOURCES = ["bitboard.c", "position.c", "movegen.c", "eval.c", "nnue.c",
              "tt.c", "tune.c", "search.c", "api.c", "uci.c", "ce.h", "tune.h"]
@@ -74,6 +76,20 @@ void ce_search(int64_t wtime, int64_t btime, int64_t winc, int64_t binc,
 int  ce_eval(void);
 int  ce_set_param(const char *name, int value);
 int  ce_get_param(const char *name, int *out);
+int  ce_evalset_load(const char *path, int limit, int cap, int keepMates,
+                     unsigned int seed);
+int  ce_evalset_size(void);
+int  ce_evalset_stats(double *corr, double *rms, double *fit);
+int  ce_search_start(int64_t wtime, int64_t btime, int64_t winc, int64_t binc,
+                     int64_t movetime, int movestogo, int depth, int64_t nodes,
+                     int infinite);
+int  ce_search_running(void);
+int  ce_search_finished(void);
+void ce_search_ponderhit(int64_t wtime, int64_t btime, int64_t winc,
+                         int64_t binc, int64_t movetime, int movestogo);
+void ce_search_join(SearchResult *out);
+void ce_search_stop(SearchResult *out);
+void ce_search_abort(void);
 """
 
 
@@ -103,18 +119,25 @@ def build(force: bool = False) -> None:
 
 
 def _ensure_net() -> None:
-    """Export net.bin from the trained weights if it is not there yet."""
+    """Quantise the trained network into net2.bin if it is not there yet.
+
+    The export needs torch, which the bot itself does not; when that is not
+    available the engine simply runs without a network and `EvalMode` falls
+    back to the hand-crafted evaluation.  Run `nnue/export.py` by hand from
+    the training environment to produce net2.bin.
+    """
     if os.path.isfile(NET_PATH):
         return
-    weights = os.path.join(HERE, "nnue_weights.npz")
-    if not os.path.isfile(weights):
+    trained = os.path.join(HERE, "nnue", "net.pt")
+    script = os.path.join(HERE, "nnue", "export.py")
+    if not (os.path.isfile(trained) and os.path.isfile(script)):
         return
-    script = os.path.join(ENGINE_DIR, "export_net.py")
     try:
         subprocess.run([sys.executable, script], cwd=HERE, capture_output=True,
                        text=True, check=True)
     except Exception as exc:                       # noqa: BLE001
-        logger.warning("could not export the NNUE weights: %s", exc)
+        logger.info("no network exported (%s); using the hand-crafted "
+                    "evaluation", exc)
 
 
 @dataclass
@@ -226,12 +249,66 @@ class Engine:
         """Search `board` and return the chosen move with search statistics."""
         res = self._ffi.new("SearchResult *")
         with Engine._lock:
+            # A background search left running would be using the same thread
+            # pool and the same transposition table as this one, so it has to
+            # go first.  Normally the ponder logic has already dealt with it;
+            # this covers the paths that have not heard of pondering at all.
+            if self._lib.ce_search_running():
+                self._lib.ce_search_abort()
             self._set_position(board)
             self._lib.ce_set_show_info(1 if show_info else 0)
             self._lib.ce_search(int(wtime_ms), int(btime_ms), int(winc_ms),
                                 int(binc_ms), int(movetime_ms), int(movestogo),
                                 int(depth), int(nodes), 0, res)
+        return self._result(board, res)
 
+    # ---- pondering ----
+
+    def ponder_start(self, board: chess.Board) -> bool:
+        """Begin an unlimited search on `board`, on a thread of its own.
+
+        Used to think on the opponent's clock: `board` is the position that
+        follows the reply we expect.  Nothing about it is binding -- if the
+        opponent plays something else the search is thrown away, and the work
+        it did is still in the transposition table.
+        """
+        with Engine._lock:
+            if self._lib.ce_search_running():
+                return False
+            self._set_position(board)
+            self._lib.ce_set_show_info(0)
+            return bool(self._lib.ce_search_start(0, 0, 0, 0, 0, 0, 0, 0, 1))
+
+    def ponder_running(self) -> bool:
+        return bool(self._lib.ce_search_running())
+
+    def ponder_hit(self, board: chess.Board, *,
+                   wtime_ms: int = 0, btime_ms: int = 0,
+                   winc_ms: int = 0, binc_ms: int = 0,
+                   movetime_ms: int = 0, movestogo: int = 0) -> SearchInfo:
+        """Hand the running ponder search a clock and wait for its answer.
+
+        The position is not re-sent: the point is that the search already has
+        a tree for it.  `board` is only needed to turn the moves it returns
+        back into python-chess objects.
+        """
+        res = self._ffi.new("SearchResult *")
+        with Engine._lock:
+            self._lib.ce_search_ponderhit(int(wtime_ms), int(btime_ms),
+                                          int(winc_ms), int(binc_ms),
+                                          int(movetime_ms), int(movestogo))
+            self._lib.ce_search_join(res)
+        return self._result(board, res)
+
+    def ponder_abort(self) -> None:
+        """Throw away a running ponder search; the table keeps what it found."""
+        with Engine._lock:
+            if self._lib.ce_search_running():
+                self._lib.ce_search_abort()
+
+    # ---- results ----
+
+    def _result(self, board: chess.Board, res) -> SearchInfo:
         info = SearchInfo(
             score_cp=res.score,
             mate=res.mate,
@@ -262,7 +339,19 @@ class Engine:
                 break
             info.pv.append(move)
             scratch.push(move)
-        if len(info.pv) > 1:
+        # Prefer the engine's own answer: when the principal variation has no
+        # second move it falls back to the transposition table, which the
+        # PV here cannot do.
+        ponder_uci = self._ffi.string(res.ponder).decode()
+        if ponder_uci and ponder_uci != "0000":
+            try:
+                scratch = board.copy(stack=False)
+                if info.move is not None:
+                    scratch.push(info.move)
+                info.ponder = scratch.parse_uci(ponder_uci)
+            except ValueError:
+                info.ponder = None
+        if info.ponder is None and len(info.pv) > 1:
             info.ponder = info.pv[1]
 
         if info.move is None:

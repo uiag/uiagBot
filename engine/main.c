@@ -14,7 +14,10 @@ extern int ce_set_position(const char *fen, const char *moves);
 extern unsigned long long ce_perft(int depth);
 
 int main(int argc, char **argv) {
-    const char *net = "net.bin";
+    /* net2.bin is the perspective network; the old 769-256-1 net.bin is not
+     * loadable any more and was weaker than the hand-crafted evaluation
+     * anyway. */
+    const char *net = "net2.bin";
     int hash = 64, threads = 1;
     int doBench = 0, doPerft = 0, argDepth = 0;
 

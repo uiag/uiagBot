@@ -40,6 +40,12 @@ project uses.
 | `tools/spsa.py` | tunes search parameters by playing games |
 | `tools/ablate.py` | measures what each feature is worth by switching it off |
 | `tools/apply_tune.py` | writes accepted values back into `engine/tune.h` |
+| `tools/eval_bias.py` | which block of the evaluation is systematically mis-weighted |
+| `tools/eval_scan.py` | scores many parameter sets against a labelled file |
+| `tools/eval_fit.py` | fits and ablates against a packed set, in C |
+| `tools/eval_compare.py` | the hand-crafted evaluation and the network, same positions |
+| `tools/test_ponder.py` | pondering over UCI |
+| `tools/test_ponder_bridge.py` | pondering through the Python bridge |
 | `results/` | JSON results, `history.jsonl`, and the games as PGN |
 
 ## Comparing two builds quickly
@@ -151,6 +157,43 @@ reasons and only one of them is a hard requirement:
   one keyed on less than it actually depends on. An engine can be strong
   without it, but its node counts are then samples rather than measurements,
   and `ttd` and `bench` stop being comparable between versions.
+
+**`timing` needs a quiet machine.** It measures wall time from sending `go` to
+reading `bestmove`, so everything between the two counts: the pipe, the Python
+scheduler, and whatever else is running. Run on a box also training a network
+and playing a seven-worker match, it reported a time forfeit at 3+0.02 -- 422 ms
+spent against a budget the engine had computed as 70 ms -- and the same build
+passed every control cleanly once the machine was idle. A forfeit here is worth
+investigating, but reproduce it on an unloaded machine before believing it.
+Fixed-node matches are not affected, which is why `duel.py` defaults to them.
+
+### Pondering
+
+Not part of a suite, because both halves need a live UCI session:
+
+```
+python testsuite/tools/test_ponder.py          # over UCI
+python testsuite/tools/test_ponder_bridge.py   # through the Python bridge
+```
+
+```
+python testsuite/tools/test_ponder_game.py     # as lichess-bot drives it
+```
+
+Each check looks for an observable consequence rather than the absence of an
+error, because pondering fails silently: the engine answers everything, plays
+legal moves, and merely throws away the work. So a ponder hit has to come back
+having searched *more* than the same position searched cold with the same
+clock — 5.1 M nodes at depth 22 against 796 k at depth 16, currently — and a
+ponder miss has to still owe the host exactly one `bestmove`.
+
+**`test_ponder_game.py` plays once on a fixed `movetime` and once on a clock,
+and the second is not redundant.** A race that hung the engine outright —
+a hit applied before the search had taken ownership of its limits — needed the
+opponent's reply to arrive within a millisecond or two of the ponder search
+starting. On a fixed move time that essentially never happens; on a real
+clock it happens on every move. All three of the other suites passed while
+the engine was unusable on lichess.
 
 It earned its keep straight away. The pawn hash table in `eval.c` is
 `__thread`-static and is not cleared by `ucinewgame`, and one of the fields it
@@ -347,6 +390,43 @@ anything that is not a static evaluation, but it is not the default.
 loss goes down, the fit is memorising the set and the run says so.
 
 A lower loss is evidence, not proof: always confirm with `duel.py`.
+
+#### Where the evaluation is actually weak
+
+`eval_bias.py` answers that without fitting anything. It scores the engine
+against deep reference scores, fits one global scale by least squares, holds it
+fixed, and reports the residual regressed against each block of the evaluation
+in turn. A block that is weighted correctly contributes nothing; a block that
+is three times too small leaves its whole bucket leaning one way. Because no
+parameter is moved to produce the number, the flattening objection above does
+not apply.
+
+```
+python testsuite/tools/eval_bias.py --data nnue/data/shard0.bin -n 25000
+python testsuite/tools/eval_fit.py --ablate       # what is each term worth
+python testsuite/tools/eval_fit.py --fit --groups newterms
+python testsuite/tools/eval_compare.py            # hce against the network
+```
+
+`eval_fit.py` is the same idea driven from C -- the position set is loaded
+across the FFI boundary once and scored in a single call, so a pass over 150k
+positions is 600 ms and a fit over 37 parameters is four minutes rather than
+an afternoon. It maximises **correlation**, which no change of scale can move,
+so the flattening trade is unavailable to it.
+
+**And it still does not predict Elo.** A fit that took the held-out
+correlation from 0.7325 to 0.7381, moving exactly the weights `eval_bias.py`
+had identified, scored **-44.8 +/- 14.8 Elo** over 1600 games. The reason is
+not calibration this time: every margin the search compares against was tuned
+against the distribution of *this* evaluation's differences, so changing the
+shape mis-sets all of them at once. A shape change and a search retune are one
+experiment, not two.
+
+Use these tools to find out *what* is wrong and to propose candidates. Use
+games to decide. The diagnosis they give is sound -- the measured conclusion
+that king safety, mobility and passed pawns sit at about a third of
+Stockfish's relative weight is recorded in `engine/README.md` -- but the
+weights they recommend are not.
 
 ### The search
 

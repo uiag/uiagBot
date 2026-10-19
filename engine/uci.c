@@ -35,14 +35,35 @@ static int starts_with(const char *s, const char *pre) {
 }
 
 extern void ce_bench(int depth);
+extern int  ce_search_start(long long, long long, long long, long long,
+                            long long, int, int, long long, int);
+extern int  ce_search_running(void);
+extern void ce_search_ponderhit(long long, long long, long long, long long,
+                                long long, int);
+extern void ce_search_join(SearchResult *out);
+extern void ce_search_stop(SearchResult *out);
+extern void ce_search_abort(void);
+extern void ce_set_bestmove_callback(void (*cb)(const SearchResult *));
+
+/* The search thread announces its own move: see the note in api.c. */
+static void report_bestmove(const SearchResult *r) {
+    if (r->ponder[0]) printf("bestmove %s ponder %s\n", r->bestmove, r->ponder);
+    else printf("bestmove %s\n", r->bestmove);
+    fflush(stdout);
+}
 
 void uci_loop(void) {
     char line[65536];
     char fen[256];
     char moves[60000];
+    /* the clock the current `go ponder` was given, to be applied on a hit */
+    long long pendWtime = 0, pendBtime = 0, pendWinc = 0, pendBinc = 0;
+    long long pendMovetime = 0;
+    int pendMovestogo = 0;
 
     setvbuf(stdout, NULL, _IOLBF, 4096);
     ce_set_show_info(1);
+    ce_set_bestmove_callback(report_bestmove);
     strcpy(fen, START_FEN);
     moves[0] = 0;
 
@@ -121,10 +142,11 @@ void uci_loop(void) {
             }
         } else if (starts_with(s, "go")) {
             long long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0, nodes = 0;
-            int movestogo = 0, depth = 0, infinite = 0;
+            int movestogo = 0, depth = 0, infinite = 0, ponder = 0;
             char *tok = strtok(s + 2, " ");
             while (tok) {
-                if (!strcmp(tok, "wtime")) { tok = strtok(NULL, " "); if (tok) wtime = atoll(tok); }
+                if (!strcmp(tok, "ponder")) ponder = 1;
+                else if (!strcmp(tok, "wtime")) { tok = strtok(NULL, " "); if (tok) wtime = atoll(tok); }
                 else if (!strcmp(tok, "btime")) { tok = strtok(NULL, " "); if (tok) btime = atoll(tok); }
                 else if (!strcmp(tok, "winc")) { tok = strtok(NULL, " "); if (tok) winc = atoll(tok); }
                 else if (!strcmp(tok, "binc")) { tok = strtok(NULL, " "); if (tok) binc = atoll(tok); }
@@ -135,15 +157,33 @@ void uci_loop(void) {
                 else if (!strcmp(tok, "infinite")) infinite = 1;
                 tok = strtok(NULL, " ");
             }
-            SearchResult r;
-            ce_search(wtime, btime, winc, binc, movetime, movestogo, depth, nodes,
-                      infinite, &r);
-            if (r.ponder[0]) printf("bestmove %s ponder %s\n", r.bestmove, r.ponder);
-            else printf("bestmove %s\n", r.bestmove);
-            fflush(stdout);
+            /*
+             * The search runs on its own thread so that this loop can keep
+             * reading.  It used to block here, which meant `stop` and
+             * `ponderhit` were unreachable -- `go infinite` could never be
+             * ended and `go ponder` was impossible, so the engine could not
+             * think on the opponent's clock through any ordinary UCI host.
+             */
+            pendWtime = wtime; pendBtime = btime;
+            pendWinc = winc; pendBinc = binc;
+            pendMovetime = movetime;
+            pendMovestogo = movestogo;
+            if (!ce_search_start(wtime, btime, winc, binc, movetime, movestogo,
+                                 depth, nodes, infinite || ponder)) {
+                printf("info string a search is already running\n");
+                fflush(stdout);
+            }
+        } else if (starts_with(s, "ponderhit")) {
+            /* The opponent played the move we were pondering on: keep the
+             * tree that search has already built and start the clock. */
+            ce_search_ponderhit(pendWtime, pendBtime, pendWinc, pendBinc,
+                                pendMovetime, pendMovestogo);
         } else if (starts_with(s, "stop")) {
-            g_stop = 1;
+            /* The callback announces the move; this only ends the search. */
+            if (ce_search_running()) ce_search_stop(NULL);
+            else g_stop = 1;
         } else if (starts_with(s, "quit")) {
+            ce_search_abort();
             break;
         } else if (starts_with(s, "bench")) {
             int d = 12;

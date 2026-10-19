@@ -84,6 +84,11 @@ class MyEngine(ExampleEngine):
         self.chess_engine.set_threads(threads)
         self.chess_engine.set_eval_mode(eval_mode)
         self.chess_engine.new_game()
+
+        # The position a ponder search is currently thinking about, if any.
+        self._ponder_fen: Optional[str] = None
+        self._ponder_hits = 0
+        self._ponder_misses = 0
         logger.info("MyEngine: %s, %d threads, %d MB hash, eval %s",
                     self.chess_engine.version, self.chess_engine.threads,
                     self.chess_engine.hash_mb, self.chess_engine.eval_mode)
@@ -109,7 +114,7 @@ class MyEngine(ExampleEngine):
         if isinstance(time_limit.nodes, int):
             kwargs["nodes"] = time_limit.nodes
 
-        result = self.chess_engine.search(board, **kwargs)
+        result = self._search_or_ponderhit(board, kwargs)
         move = result.move
 
         # Honour a restricted move list (e.g. from an endgame tablebase).
@@ -136,4 +141,84 @@ class MyEngine(ExampleEngine):
         }
 
         ponder_move = result.ponder if ponder else None
+        if ponder:
+            self._start_pondering(board, move, ponder_move)
         return PlayResult(move, ponder_move, info=info, draw_offered=draw_offered)
+
+    # ------------------------------------------------------------------
+    # pondering
+    #
+    # lichess-bot drives a homemade engine by calling `search` and waiting for
+    # it, so half of every game -- the opponent's half -- used to be spent
+    # doing nothing at all.  The engine now keeps searching the position it
+    # expects after the opponent's reply.  When the reply is the predicted one
+    # the search is handed the clock and carries on from the depth it has
+    # already reached; when it is not, the search is dropped, and the part of
+    # it that was useful stays in the transposition table either way.
+    #
+    # `ponder` is passed in by lichess-bot according to `ponder:` in
+    # config.yml, and it is already false where pondering would be wrong --
+    # the first move of a game, and correspondence games the bot is not
+    # connected to.
+    # ------------------------------------------------------------------
+
+    def _search_or_ponderhit(self, board: chess.Board,
+                             kwargs: dict[str, int]) -> Any:
+        """Use the running ponder search if it is on this very position."""
+        engine = self.chess_engine
+        if self._ponder_fen is None:
+            return engine.search(board, **kwargs)
+
+        want, self._ponder_fen = self._ponder_fen, None
+        if not engine.ponder_running():
+            # It ran out of depth while we waited; nothing to hand a clock to.
+            logger.info("the ponder search had already finished; searching afresh")
+            return engine.search(board, **kwargs)
+
+        if want != board.fen():
+            self._ponder_misses += 1
+            # Log both positions: a hit rate that is lower than the engine's
+            # own move prediction deserves looks exactly like a correct miss
+            # unless you can see what was compared.
+            logger.info("ponder miss (%d hit / %d miss); the table keeps the "
+                        "work\n  pondered %s\n  arrived  %s",
+                        self._ponder_hits, self._ponder_misses, want, board.fen())
+            engine.ponder_abort()
+            return engine.search(board, **kwargs)
+
+        self._ponder_hits += 1
+        logger.info("ponder hit (%d hit / %d miss)",
+                    self._ponder_hits, self._ponder_misses)
+        return engine.ponder_hit(board, **kwargs)
+
+    def _start_pondering(self, board: chess.Board, move: Optional[chess.Move],
+                         ponder_move: Optional[chess.Move]) -> None:
+        """Think about the position after the reply we expect."""
+        self._ponder_fen = None
+        if move is None or ponder_move is None:
+            return
+        try:
+            scratch = board.copy()
+            scratch.push(move)
+            if ponder_move not in scratch.legal_moves:
+                return
+            scratch.push(ponder_move)
+            if scratch.is_game_over(claim_draw=False):
+                return
+            fen = scratch.fen()
+            if self.chess_engine.ponder_start(scratch):
+                self._ponder_fen = fen
+        except Exception:                              # noqa: BLE001
+            # Pondering is an optimisation; nothing about it is worth losing
+            # a game over, so a failure here only costs the optimisation.
+            logger.exception("could not start pondering")
+            self._ponder_fen = None
+
+    def quit(self) -> None:
+        """Shut down: a ponder search must not outlive the game."""
+        try:
+            self.chess_engine.ponder_abort()
+        except Exception:                              # noqa: BLE001
+            pass
+        self._ponder_fen = None
+        super().quit()

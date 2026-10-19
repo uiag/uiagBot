@@ -20,6 +20,16 @@ engine/net.bin
 # training data and per-epoch snapshots (too large for GitHub's 100 MB limit)
 evaluationModel/*.jsonl
 evaluationModel/nnue_lichess_[0-9]*.npz
+nnue/data/*
+nnue/*.exe
+nnue/*.pt
+nnue/*.bin
+nnue/.scratch
+# engine/net2.bin is deliberately *not* ignored: at 1.5 MB it is small enough
+# to keep, and without it a fresh checkout cannot use EvalMode=nnue at all --
+# exporting it needs torch, which the bot itself does not have.
+engine/net_random.bin
+engine/ce_verify.exe
 
 # prebuilt stockfish binary (over GitHub's 100 MB limit)
 stockfish/*.exe

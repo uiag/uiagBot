@@ -390,6 +390,10 @@ typedef struct {
 } SearchResult;
 
 extern volatile int g_stop;
+/* Set by search_go once the limits and the clock are in place.  A background
+ * search has to be known to have got that far before anything may hand it a
+ * ponder hit, or the hit is overwritten by the search's own initialisation. */
+extern volatile int g_searchStarted;
 extern int g_threadCount;
 extern int g_showInfo;        /* print UCI info lines */
 extern int g_multiPV;
@@ -398,6 +402,9 @@ void search_init(void);
 void search_setup_threads(int n);
 void search_new_game(void);
 void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *res);
+/* Give a search that was started with `infinite` a real clock, keeping the
+ * work it has already done.  This is what makes a ponder hit worth having. */
+void search_ponderhit(const SearchLimits *lim);
 int64_t now_ms(void);
 
 /* ------------------------------------------------------------------ */

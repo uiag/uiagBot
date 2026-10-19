@@ -31,7 +31,7 @@ command = "engine/ce.exe"
 # right argument slot.
 perft_command = "perft"
 bench_command = "bench"
-options = { Hash = 1024, Threads = 6, EvalMode = "hce" }
+options = { Hash = 1024, Threads = 6, EvalMode = "blend" }
 
 # ---------------------------------------------------------------- the referee
 # A strong engine used only by tools/make_suites.py to generate and verify the

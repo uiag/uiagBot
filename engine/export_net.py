@@ -1,4 +1,9 @@
 """
+RETIRED.  This writes the "CENN" version 1 format, which the engine no longer
+reads: `nnue.c` now holds a two-perspective network and loads "CEN2" from
+engine/net2.bin.  Use nnue/export.py instead.  Kept only so that the old
+769-256-1 weights in evaluationModel/ are not orphaned; nothing calls it.
+
 Convert the trained NNUE weights (nnue_weights.npz) into engine/net.bin.
 
 The network is 769 -> 256 -> 1 with ReLU and a sigmoid output; the engine

@@ -464,17 +464,31 @@ static PawnEntry *pawn_eval(const Position *pos) {
             passed = passed && !(ourPawns & ForwardFileBB[us][sq]);
             if (passed) e->passed[us] |= bb_of(sq);
 
+            /* blocked by an enemy pawn directly in front */
+            int blocked = (theirPawns & bb_of(sq + (us == WHITE ? 8 : -8))) != 0;
+
             if (support | phalanx) {
                 int v = ConnectedSeed[r] * (2 + (phalanx ? 1 : 0) - (opposed ? 1 : 0))
                       + 21 * popcount(support);
                 e->mg += sign * v;
                 e->eg += sign * (v * (r - 2) / 4);
             } else if (!neighbours) {
-                e->mg -= sign * ISOLATED_MG;
-                e->eg -= sign * ISOLATED_EG;
-                if (!opposed) {
-                    e->mg -= sign * WEAK_UNOPPOSED_MG;
-                    e->eg -= sign * WEAK_UNOPPOSED_EG;
+                /* Isolated *and* doubled is worse than either: the front pawn
+                 * cannot advance and the back one cannot be defended, so the
+                 * pair is one weakness rather than two half ones.  Stockfish
+                 * prices that case on its own and this evaluation was adding
+                 * the two penalties independently, which came to much less. */
+                if (opposed && (ourPawns & ForwardFileBB[them][sq])
+                    && !(theirPawns & AdjacentFilesBB[f])) {
+                    e->mg -= sign * DoubledIsolatedMg;
+                    e->eg -= sign * DoubledIsolatedEg;
+                } else {
+                    e->mg -= sign * ISOLATED_MG;
+                    e->eg -= sign * ISOLATED_EG;
+                    if (!opposed) {
+                        e->mg -= sign * WEAK_UNOPPOSED_MG;
+                        e->eg -= sign * WEAK_UNOPPOSED_EG;
+                    }
                 }
             } else if (backward) {
                 e->mg -= sign * BACKWARD_MG;
@@ -483,11 +497,23 @@ static PawnEntry *pawn_eval(const Position *pos) {
                     e->mg -= sign * WEAK_UNOPPOSED_MG;
                     e->eg -= sign * WEAK_UNOPPOSED_EG;
                 }
+            } else if (blocked && r >= 4) {
+                /* A pawn on the fifth or sixth with an enemy pawn in front of
+                 * it is going nowhere, and it is the one square its own pieces
+                 * most wanted. */
+                if (r == 4) { e->mg -= sign * BlockedPawn5Mg; e->eg -= sign * BlockedPawn5Eg; }
+                else        { e->mg -= sign * BlockedPawn6Mg; e->eg -= sign * BlockedPawn6Eg; }
             }
 
-            if (doubled && !support) {
-                e->mg -= sign * DOUBLED_MG;
-                e->eg -= sign * DOUBLED_EG;
+            if (!support) {
+                if (doubled) {
+                    e->mg -= sign * DOUBLED_MG;
+                    e->eg -= sign * DOUBLED_EG;
+                }
+                /* Levered twice and defended none: whichever way it is taken,
+                 * the structure behind it comes apart. */
+                if (lever && (lever & (lever - 1)))
+                    e->eg -= sign * WeakLeverEg;
             }
 
             /* A candidate passer: not passed yet, but on the files ahead we
@@ -572,6 +598,7 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
     int theirKing = lsb(pieces_cp(pos, them, KING));
     U64 outpostRanks = us == WHITE ? (RankBB[3] | RankBB[4] | RankBB[5])
                                    : (RankBB[4] | RankBB[3] | RankBB[2]);
+    int ourKing = lsb(pieces_cp(pos, us, KING));
 
     for (int pt = KNIGHT; pt <= QUEEN; pt++) {
         U64 b = pieces_cp(pos, us, pt);
@@ -605,6 +632,13 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
             ei->mobilityEg[us] += MobilityEg[pt - KNIGHT][mob];
 
             if (pt == KNIGHT || pt == BISHOP) {
+                /* A minor far from its own king is a minor not defending it.
+                 * The piece-square tables reward the centre but say nothing
+                 * about where the king actually is. */
+                int kd = SquareDistance[sq][ourKing];
+                *mg -= sign * KingProtectorMg * kd / 8;
+                *eg -= sign * KingProtectorEg * kd / 8;
+
                 /* outposts */
                 U64 outpost = outpostRanks & ~ei->pe->attacksSpan[them];
                 if (outpost & bb_of(sq)) {
@@ -639,6 +673,13 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
                         *mg += sign * 45; *eg += sign * 0;
                     }
 
+                    /* A bishop whose diagonal already crosses the king ring is
+                     * part of an attack before it has moved; only the pawns
+                     * block the line, because a piece in the way will not
+                     * stay there. */
+                    if (bishop_attacks(sq, pos->byType[PAWN]) & ei->kingRing[them])
+                        *mg += sign * BishopOnKingRing;
+
                     /* A bishop that took the pawn on a7/h7 (a2/h2) and is now
                      * shut in by an enemy pawn on b6/g6 has cost more than
                      * the pawn was worth.  The evaluation could not see this
@@ -657,6 +698,9 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
                 }
             } else if (pt == ROOK) {
                 int f = file_of(sq);
+                /* the rook's file already runs into the king ring */
+                if (FileBB[f] & ei->kingRing[them])
+                    *mg += sign * RookOnKingRing;
                 if (!(ourPawns & FileBB[f])) {
                     if (!(theirPawns & FileBB[f])) { *mg += sign * 47; *eg += sign * 26; }
                     else                           { *mg += sign * 19; *eg += sign * 7; }
@@ -702,6 +746,12 @@ static void eval_pieces(const Position *pos, EvalInfo *ei, int us, int *mg, int 
                     if (between && !(between & (between - 1))) queenPinners |= bb_of(sn);
                 }
                 if (queenPinners) { *mg -= sign * 56; *eg -= sign * 15; }
+
+                /* A queen past the middle of the board on a square no enemy
+                 * pawn can ever attack is settled there, which in an endgame
+                 * is most of the game. */
+                if (rel_rank(us, sq) > 4 && !(ei->pe->attacksSpan[them] & bb_of(sq)))
+                    *eg += sign * QueenInfiltration;
             }
         }
     }
@@ -767,12 +817,20 @@ static int eval_king_danger(const Position *pos, EvalInfo *ei, int us, int *mg, 
              & (~ei->attackedBy[us][ALL] | (weak & ei->attackedBy2[them]));
 
     U64 occ = pos->occ ^ pieces_cp(pos, us, QUEEN);
-    U64 rookChecks   = rook_attacks(ksq, occ)   & ei->attackedBy[them][ROOK]   & safe;
-    U64 queenChecks  = queen_attacks(ksq, occ)  & ei->attackedBy[them][QUEEN]  & safe
+    U64 rookRay   = rook_attacks(ksq, occ);
+    U64 bishopRay = bishop_attacks(ksq, occ);
+    U64 rookChecks   = rookRay   & ei->attackedBy[them][ROOK]   & safe;
+    U64 queenChecks  = (rookRay | bishopRay) & ei->attackedBy[them][QUEEN]  & safe
                      & ~rookChecks & ~ei->attackedBy[us][QUEEN];
-    U64 bishopChecks = bishop_attacks(ksq, occ) & ei->attackedBy[them][BISHOP] & safe
+    U64 bishopChecks = bishopRay & ei->attackedBy[them][BISHOP] & safe
                      & ~queenChecks;
     U64 knightChecks = KnightAttacksBB[ksq]     & ei->attackedBy[them][KNIGHT];
+
+    /* A check the enemy cannot give safely still constrains the king: it has
+     * to stay answerable, and one defender leaving turns it into a real one. */
+    U64 unsafeChecks = ((rookRay   & ei->attackedBy[them][ROOK])
+                      | (bishopRay & ei->attackedBy[them][BISHOP])
+                      | knightChecks) & ~safe;
 
     int danger = ei->kingAttackersCount[them] * ei->kingAttackersWeight[them] / 2;
     if (rookChecks)   danger += 1080;
@@ -784,9 +842,22 @@ static int eval_king_danger(const Position *pos, EvalInfo *ei, int us, int *mg, 
     danger += 183 * popcount(ei->kingRing[us] & weak)
             +  69 * ei->kingAttacksCount[them]
             +  98 * popcount(pos->blockersForKing[us])
+            + KdUnsafeCheck * popcount(unsafeChecks)
             - 873 * (popcount(pieces_cp(pos, them, QUEEN)) == 0)
             -   6 * shelterMg / 8
             -  30;
+
+    /* A knight covering the king ring is the one defender that cannot be
+     * driven off by a pawn or traded away at a distance. */
+    if (ei->attackedBy[us][KNIGHT] & ei->kingRing[us])
+        danger -= KdKnightDefender;
+
+    /* Whoever has the freer position is the one who can bring pieces to the
+     * attack.  Stockfish folds the mobility difference straight into king
+     * danger and this evaluation counted mobility only as a score of its own,
+     * so a side that was being slowly squeezed did not look like one in any
+     * danger. */
+    danger += (ei->mobilityMg[them] - ei->mobilityMg[us]) * KdMobWeight / 128;
 
     /* attacks on the king's flank */
     U64 flank = KingFlankBB[file_of(ksq)];
@@ -801,6 +872,15 @@ static int eval_king_danger(const Position *pos, EvalInfo *ei, int us, int *mg, 
         int sign = us == WHITE ? 1 : -1;
         *mg -= sign * (danger * danger / 4096) * KingDangerWeight / 128;
         *eg -= sign * (danger / 16) * KingDangerWeight / 128;
+    }
+
+    /* A king standing on a flank with no pawn of either colour has no shelter
+     * to be had there and no way to build one: in the endgame that is where
+     * the game is decided, which is why the penalty is mostly an endgame one. */
+    if (!(pos->byType[PAWN] & flank)) {
+        int sign = us == WHITE ? 1 : -1;
+        *mg -= sign * PawnlessFlankMg;
+        *eg -= sign * PawnlessFlankEg;
     }
 
     /* A king on a file with no pawn of its own is exposed to the heavy
@@ -920,6 +1000,29 @@ static void eval_threats(const Position *pos, EvalInfo *ei, int us, int *mg, int
                    & ei->attackedBy[us][ALL];
     *mg += sign * 7 * popcount(restricted);
     *eg += sign * 7 * popcount(restricted);
+
+    /*
+     * Threats against the queen on the move after this one.  A square from
+     * which a knight would fork or a slider would skewer the queen is worth
+     * something even while it is empty, because the queen has to keep
+     * answering for it.  The evaluation had nothing of this at all, which is
+     * most of why the engine would walk its queen into a position where every
+     * reasonable move loses a tempo.
+     */
+    if (popcount(pieces_cp(pos, them, QUEEN)) == 1) {
+        int qsq = lsb(pieces_cp(pos, them, QUEEN));
+        U64 safe = ei->mobilityArea[us] & ~stronglyProtected;
+
+        U64 b2 = ei->attackedBy[us][KNIGHT] & KnightAttacksBB[qsq] & safe;
+        *mg += sign * KnightOnQueenMg * popcount(b2);
+        *eg += sign * KnightOnQueenEg * popcount(b2);
+
+        b2 = ((ei->attackedBy[us][BISHOP] & bishop_attacks(qsq, pos->occ))
+            | (ei->attackedBy[us][ROOK] & rook_attacks(qsq, pos->occ)))
+           & safe & ei->attackedBy2[us];
+        *mg += sign * SliderOnQueenMg * popcount(b2);
+        *eg += sign * SliderOnQueenEg * popcount(b2);
+    }
 }
 
 static void eval_space(const Position *pos, EvalInfo *ei, int us, int *mg) {
@@ -1312,11 +1415,14 @@ int eval_position_window(Position *pos, int alpha, int beta) {
     if (g_evalMode == EVAL_NNUE && nnue_available()) {
         v = nnue_evaluate(pos);
     } else if (g_evalMode == EVAL_BLEND && nnue_available()) {
-        /* Weighted towards the hand-crafted evaluation, which is the stronger
-         * of the two (21-3 in self-play against the current network). */
+        /* A mixture of the two, weighted by BlendNnueWeight out of 128.  It
+         * used to be fixed at 1:3 towards the hand-crafted evaluation, which
+         * was right when the network was a 769-256-1 net that lost to it
+         * 21-3; the perspective network is now the better of the two and the
+         * old weighting had it backwards. */
         int h = eval_hce(pos);
         int n = nnue_evaluate(pos);
-        v = (h * 3 + n) / 4;
+        v = (n * BlendNnueWeight + h * (128 - BlendNnueWeight)) / 128;
     } else {
         v = eval_hce_window(pos, alpha, beta);
     }

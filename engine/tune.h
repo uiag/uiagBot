@@ -26,6 +26,10 @@
     TUNE(LmrDeltaCap,       1024,    32,  8192)  /* clamp on the root window */\
     TUNE(LmrHistDiv,        7000,  2000, 32000)                               \
     TUNE(LmrHistMax,        2048,   512,  8192)  /* cap, in 1/1024 ply */     \
+    /* The same idea for captures, which had no history term at all: a        \
+     * capture that has been refuted everywhere else is worth less of a look  \
+     * than one that keeps working.  0 disables it. */                        \
+    TUNE(LmrCaptHistDiv,       0,     0, 32000)                               \
     TUNE(LmrCutoffCnt,         3,     1,    16)                               \
     TUNE(LmrDeeperMargin,     70,    10,   300)  /* re-search one ply deeper */\
     TUNE(QuietBonusMargin,    60,    10,   300)  /* extra history on a rout */ \
@@ -69,6 +73,12 @@
     TUNE(AspInitDelta,        10,     4,    40)                               \
     TUNE(AspScoreDiv,      16384,  2048, 65535)                               \
     TUNE(TimeNodeEffort,     115,    50,   250)                               \
+    /* Milliseconds held back from the clock for everything that is not the    \
+     * search: the pipe, the scheduler, and whatever the host adds.  25 is     \
+     * right for a local tournament manager.  Over the network lichess-bot     \
+     * already subtracts its own `move_overhead` (a second by default) before  \
+     * the clock reaches the engine, so this does not have to cover that. */   \
+    TUNE(MoveOverhead,        25,     0,  1000)                               \
     /* a switch, so the feature can be measured by turning it off */           \
     TUNE(UseCuckoo,            1,     0,     1)                               \
     /* Quiet checks in quiescence.  Implemented, measured, and off: it costs  \
@@ -124,6 +134,44 @@
     TUNE(ConnectedRooks,      11,     0,    80)                               \
     TUNE(KingOpenFile,        36,     0,   100)                               \
     TUNE(RookOn7th,            1,     0,     1)  /* 1 = require a target */    \
+    /* ---------------- evaluation: terms taken from Stockfish 11/12 -------- */\
+    /* These are the blocks this evaluation did not have at all.  The values   \
+     * are Stockfish's own, multiplied by 1.2: its terms are denominated in a  \
+     * pawn of 124 mg / 206 eg while a pawn here is 97 mg / 123 eg, and the    \
+     * group weight each block passes through makes up the rest.  Every one    \
+     * is settable to 0, which is how each was measured on its own. */         \
+    /* threats against the queen -- SF11 S(16,12) and S(60,18) */              \
+    TUNE(KnightOnQueenMg,     19,     0,   100)                               \
+    TUNE(KnightOnQueenEg,     14,     0,   100)                               \
+    TUNE(SliderOnQueenMg,     72,     0,   200)                               \
+    TUNE(SliderOnQueenEg,     22,     0,   200)                               \
+    /* a minor far from its own king is a minor not defending it -- S(7,8) */  \
+    TUNE(KingProtectorMg,      8,     0,    40)                               \
+    TUNE(KingProtectorEg,     10,     0,    40)                               \
+    /* a slider whose line already crosses the enemy king ring -- SF12 */      \
+    TUNE(RookOnKingRing,      19,     0,    80)                               \
+    TUNE(BishopOnKingRing,    29,     0,    80)                               \
+    /* a queen deep in enemy territory that no pawn can chase -- S(-2,14) */   \
+    TUNE(QueenInfiltration,   17,     0,    80)                               \
+    /* own pawn on the fifth or sixth, blocked by an enemy pawn -- SF11 */     \
+    TUNE(BlockedPawn5Mg,      16,     0,    80)                               \
+    TUNE(BlockedPawn5Eg,       5,     0,    80)                               \
+    TUNE(BlockedPawn6Mg,       5,     0,    80)                               \
+    TUNE(BlockedPawn6Eg,       0,     0,    80)                               \
+    /* isolated *and* doubled is worse than the sum -- SF12 S(11,56) */        \
+    TUNE(DoubledIsolatedMg,   13,     0,    80)                               \
+    TUNE(DoubledIsolatedEg,   67,     0,   160)                               \
+    /* a pawn levered twice and supported none -- SF12 S(0,56) */              \
+    TUNE(WeakLeverEg,         67,     0,   160)                               \
+    /* our king on a flank with no pawn of either colour -- S(17,95) */        \
+    TUNE(PawnlessFlankMg,     20,     0,   100)                               \
+    TUNE(PawnlessFlankEg,    114,     0,   240)                               \
+    /* king danger: a knight covering the ring is worth a hundred of it */     \
+    TUNE(KdKnightDefender,   100,     0,   400)                               \
+    /* checks the enemy cannot safely give still have to be answered */        \
+    TUNE(KdUnsafeCheck,       60,     0,   300)                               \
+    /* who has the freer position, in king-danger units (128 = 1:1) */         \
+    TUNE(KdMobWeight,        128,     0,   256)                               \
     /* ---------------- evaluation: per-group weights ---------------- */       \
     /* Each block of the evaluation gets its own weight over 128 on top of     \
      * PosWeight*, so the tuner can move one group without moving the rest.    \
@@ -139,6 +187,19 @@
     TUNE(ThreatWeightMg,     202,    32,   256)                               \
     TUNE(ThreatWeightEg,     182,    32,   256)                               \
     TUNE(SpaceWeight,         74,    32,   256)                               \
+    /* ---------------- evaluation: the network ---------------- */             \
+    /* The network reports centipawns, while the hand-crafted evaluation's     \
+     * units are about twice that and every search margin in this file was     \
+     * tuned against them.  This puts the two on one scale so that EvalMode    \
+     * changes the evaluation and nothing else. */                             \
+    /* 154 is measured, not guessed: over 120k held-out positions it puts the  \
+     * network's least-squares centipawns-per-unit at 1.91, which is what the  \
+     * hand-crafted evaluation reads.  The nominal 400 cp per logit the net    \
+     * was trained on comes out higher than that, because a loss taken in      \
+     * win-probability space deliberately compresses large scores. */          \
+    TUNE(NnueScale,          154,    50,   400)                               \
+    /* EvalMode=blend: the network's share of the mixture, out of 128. */      \
+    TUNE(BlendNnueWeight,     96,     0,   128)                               \
     /* ---------------- evaluation: piece values ---------------- */            \
     /* per-mille multipliers on the tabulated values, so the tuner can price   \
      * the pieces against each other without touching the tables */            \

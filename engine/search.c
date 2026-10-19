@@ -29,6 +29,7 @@
 #define MAX_THREADS 64
 
 volatile int g_stop = 0;
+volatile int g_searchStarted = 0;
 int g_threadCount = 1;
 int g_showInfo = 0;
 int g_multiPV = 1;
@@ -40,6 +41,7 @@ static SearchLimits Limits;
 static int64_t StartTime, OptimumTime, MaximumTime;
 static int64_t LimitNodes;
 static int RootPly;
+static int RootSide;   /* the side to move at the root, for re-timing */
 
 /* ------------------------------------------------------------------ */
 /* time                                                                */
@@ -63,14 +65,12 @@ int64_t now_ms(void) {
 
 static int64_t elapsed(void) { return now_ms() - StartTime; }
 
-#define MOVE_OVERHEAD 25
-
 static void init_time(const SearchLimits *lim, int side, int ply) {
     StartTime = now_ms();
     LimitNodes = lim->nodes;
 
     if (lim->movetime > 0) {
-        OptimumTime = MaximumTime = lim->movetime - MOVE_OVERHEAD;
+        OptimumTime = MaximumTime = lim->movetime - MoveOverhead;
         if (OptimumTime < 1) OptimumTime = MaximumTime = 1;
         return;
     }
@@ -82,7 +82,7 @@ static void init_time(const SearchLimits *lim, int side, int ply) {
     }
 
     int mtg = lim->movestogo ? (lim->movestogo < 50 ? lim->movestogo : 50) : 50;
-    int64_t timeLeft = time + inc * (mtg - 1) - MOVE_OVERHEAD * (2 + mtg);
+    int64_t timeLeft = time + inc * (mtg - 1) - MoveOverhead * (2 + mtg);
     if (timeLeft < 1) timeLeft = 1;
 
     double optScale, maxScale;
@@ -106,11 +106,60 @@ static void init_time(const SearchLimits *lim, int side, int ply) {
     /* Never put more than this share of the remaining clock into one move.
      * Without it a single long iteration late in a fast game can leave too
      * little behind to answer the next move, which costs the game on time. */
-    int64_t cap = (int64_t)(0.45 * (double)(time - MOVE_OVERHEAD));
+    int64_t cap = (int64_t)(0.45 * (double)(time - MoveOverhead));
     if (cap < 1) cap = 1;
     if (MaximumTime > cap) MaximumTime = cap;
     if (OptimumTime > MaximumTime) OptimumTime = MaximumTime;
     if (OptimumTime < 1) OptimumTime = 1;
+}
+
+/*
+ * Hand an in-flight search a clock.
+ *
+ * A ponder search is started with `infinite` set, so it has no deadline and
+ * the time-management block in thread_search is skipped.  When the opponent
+ * plays the move that was predicted, the thinking already done is ours to
+ * keep: the limits are replaced and the clock is restarted from now, so the
+ * search carries on from the depth it has reached with a full move's time in
+ * front of it.
+ *
+ * Called from the thread that drives the engine while the search threads are
+ * running.  Every field written here is a naturally aligned scalar that the
+ * search only reads, and `Limits.infinite` is cleared last, which is the one
+ * ordering that matters: until it goes to zero no search thread consults a
+ * deadline at all, so none of them can see a half-written one.
+ */
+void search_ponderhit(const SearchLimits *lim) {
+    SearchLimits next = *lim;
+    next.infinite = 0;
+    int64_t keepNodes = Limits.nodes;
+
+    Limits.wtime = next.wtime;
+    Limits.btime = next.btime;
+    Limits.winc = next.winc;
+    Limits.binc = next.binc;
+    Limits.movetime = next.movetime;
+    Limits.movestogo = next.movestogo;
+    Limits.depth = next.depth;
+    Limits.nodes = next.nodes;
+
+    init_time(&Limits, RootSide, RootPly);
+    /* init_time resets the node limit from the new limits; a ponder search
+     * that was given one keeps it. */
+    if (next.nodes == 0 && keepNodes > 0) LimitNodes = keepNodes;
+
+    /*
+     * A zero clock means "no deadline" to init_time, which is right for a
+     * depth- or node-limited search and catastrophic here: clearing
+     * `infinite` below would leave a search with nothing at all to stop it.
+     * A host that sends a ponder hit without a clock (or with a movetime the
+     * hit did not carry over) gets a second rather than a hang.
+     */
+    if (MaximumTime <= 0 && Limits.depth == 0 && LimitNodes == 0) {
+        OptimumTime = MaximumTime = 1000;
+    }
+
+    Limits.infinite = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1096,6 +1145,15 @@ moves_loop:;
                 if (h > LmrHistMax) h = LmrHistMax;
                 if (h < -LmrHistMax) h = -LmrHistMax;
                 r1024 -= h;
+            } else if (LmrCaptHistDiv) {
+                /* Captures were reduced by position in the move list alone,
+                 * with no account of how the same capture has fared
+                 * elsewhere in this search. */
+                int h = th->captHist[movedPiece][move_to(m)][captured_type(pos, m)]
+                      * 1024 / LmrCaptHistDiv;
+                if (h > LmrHistMax) h = LmrHistMax;
+                if (h < -LmrHistMax) h = -LmrHistMax;
+                r1024 -= h;
             }
 
             int r = r1024 / 1024;
@@ -1462,7 +1520,12 @@ void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *r
     Limits = *lim;
     g_stop = 0;
     RootPly = rootPos->histCount;
+    RootSide = rootPos->side;
     init_time(lim, rootPos->side, RootPly);
+    /* From here on the limits and the clock are this search's own, so a
+     * ponder hit arriving from another thread will replace them rather than
+     * be replaced by them.  Nothing may re-time the search before this. */
+    g_searchStarted = 1;
     tt_new_search();
 
     memset(res, 0, sizeof(*res));
@@ -1585,8 +1648,30 @@ void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *r
     RootMove *rm = &best->rootMoves[0];
     if (rm->score == -VALUE_INFINITE) rm->score = 0;   /* stopped before depth 1 */
     move_to_uci(rm->move, res->bestmove);
-    if (rm->pvLen > 1) move_to_uci(rm->pv[1], res->ponder);
-    else strcpy(res->ponder, "");
+    res->ponder[0] = 0;
+    if (rm->pvLen > 1) {
+        move_to_uci(rm->pv[1], res->ponder);
+    } else {
+        /*
+         * No second move in the principal variation, so nothing to ponder on
+         * -- and that happens often enough to matter: an iteration cut short,
+         * a window that failed high, or a child that claimed a draw all leave
+         * a one-move PV, and it was costing roughly a third of the chances to
+         * think on the opponent's clock.
+         *
+         * The table almost always knows anyway.  Play our move and ask it
+         * what the reply was.
+         */
+        Position p = *rootPos;
+        if (p.histCount < MAX_HIST - 2) {
+            pos_do_move(&p, rm->move);
+            int found;
+            TTEntry *tte = tt_probe(p.key, &found);
+            if (found && tte->move != MOVE_NONE
+                && pos_pseudo_legal(&p, tte->move) && pos_legal(&p, tte->move))
+                move_to_uci(tte->move, res->ponder);
+        }
+    }
 
     int64_t nodes = 0;
     for (int i = 0; i < g_threadCount; i++) nodes += Threads[i]->nodes;
