@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/lichess-bot-master.iml" filepath="$PROJECT_DIR$/.idea/lichess-bot-master.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/uiagBot.iml" filepath="$PROJECT_DIR$/.idea/uiagBot.iml" />
     </modules>
   </component>
 </project>

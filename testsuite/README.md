@@ -521,7 +521,7 @@ options = { Threads = 1, Hash = 64 }
 
 [[opponent]]
 name         = "sf-10knodes"
-command      = "stockfish/stockfish-windows-x86-64-avx2.exe"
+command      = "third_party/stockfish/stockfish-windows-x86-64-avx2.exe"
 time_control = "nodes=10000"          # this engine ignores the match clock
 options      = { Threads = 1, Hash = 32 }
 ```

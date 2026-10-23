@@ -1,112 +1,111 @@
-<div align="center">
+# uiagBot
 
-  ![lichess-bot](https://github.com/lichess-bot-devs/lichess-bot-images/blob/main/lichess-bot-icon-400.png)
-
-  <h1>lichess-bot</h1>
-
-  A bridge between [lichess.org](https://lichess.org) and bots.
-  <br>
-  <strong>[Explore lichess-bot docs »](https://github.com/lichess-bot-devs/lichess-bot/wiki)</strong>
-  <br>
-  <br>
-  [![Python Build](https://github.com/lichess-bot-devs/lichess-bot/actions/workflows/python-build.yml/badge.svg)](https://github.com/lichess-bot-devs/lichess-bot/actions/workflows/python-build.yml)
-  [![Python Test](https://github.com/lichess-bot-devs/lichess-bot/actions/workflows/python-test.yml/badge.svg)](https://github.com/lichess-bot-devs/lichess-bot/actions/workflows/python-test.yml)
-  [![Mypy](https://github.com/lichess-bot-devs/lichess-bot/actions/workflows/mypy.yml/badge.svg)](https://github.com/lichess-bot-devs/lichess-bot/actions/workflows/mypy.yml)
-
-</div>
-
-## This bot's engine
-
-This copy of lichess-bot plays with its own engine instead of an external one.
-The engine is written in C and lives in [`engine/`](engine/README.md); it is
-loaded as a shared library by [`engine_core.py`](engine_core.py) and driven by
-the `MyEngine` class in [`homemade.py`](homemade.py). It needs no network
-access and no other engine — only the local Polyglot opening book that
-lichess-bot itself handles (`engine: polyglot:` in `config.yml`).
+A UCI chess engine written from scratch in C, with an evaluation network
+trained from scratch as well, plus the bot that plays it on
+[Lichess](https://lichess.org).
 
 ```
-python engine/build.py       # compile (engine_core.py also does this on demand)
-engine/ce.exe                # the same engine as a standalone UCI engine
+python engine/build.py          # compile the engine
+engine/ce.exe                   # play it as a standalone UCI engine
+python lichess-bot.py           # run the Lichess bot
+python ccrl/build.py            # build the CCRL release package
 ```
 
-Engine settings go under `engine: homemade_options:` in `config.yml` (the
-`uci_options:` block below it applies to external UCI engines only, and is
-ignored by `MyEngine`):
+The engine is a bitboard engine: magic-bitboard move generation (magics
+searched for at start-up with a fixed seed), an iterative-deepening PVS search
+with the usual modern pruning, Lazy SMP, and a choice of three evaluations
+selected by the `EvalMode` option — a Texel-tuned hand-crafted evaluation
+(`hce`), the network alone (`nnue`), or a blend of the two (`blend`, the
+default and the strongest).
+
+The network is a perspective net, `(768 -> 1024) x 2 -> 1`, with SCReLU,
+king-bucketed inputs with the files folded, and eight output buckets by piece
+count, quantised to int16 with an incremental accumulator. It was trained on
+the public [Lichess evaluation dump](https://database.lichess.org/#evals) — no
+self-play against another engine and no distillation of another engine's
+search.
+
+Measured against **Stockfish 19 64-bit at one thread** (CCRL 40/15: 3629),
+single-threaded, 256 MB hash, 30s+0.3s: **4.5/30, −301 Elo**, which puts
+uiagBot in the region of 3300 on that scale. See
+[`ccrl/SUBMISSION.md`](ccrl/SUBMISSION.md) for what that number is and is not
+worth.
+
+---
+
+## What in here is mine, and what is not
+
+This repository contains two pieces of other people's work, and they are kept
+apart from mine so there is no ambiguity about which is which. Everything
+under `third_party/` is somebody else's; everything outside it is mine.
+
+| directory | whose | what it is |
+| --- | --- | --- |
+| [`engine/`](engine/README.md) | **mine** | the chess engine, in C — search, evaluation, the quantised network and its accumulator, and the standalone UCI front-end |
+| [`nnue/`](nnue/README.md) | **mine** | the network: architecture, the data pipeline over the Lichess evaluation dump, training, export to the engine's format, and the checks that keep the incremental accumulator honest |
+| [`testsuite/`](testsuite/README.md) | **mine** | the harness every change in `engine/` was measured with — perft, tactics, mates, draws, determinism, clock safety, SPRT, Elo ladders |
+| [`ccrl/`](ccrl/README.md) | **mine** | packaging the engine for [CCRL](https://computerchess.org.uk/ccrl/4040/) submission |
+| `engine_core.py` | **mine** | the cffi bridge that loads `engine/ce.dll` into Python |
+| `homemade.py` | **mine** | the `MyEngine` class lichess-bot drives, implementing its `MinimalEngine` interface |
+| `lichess-bot.py` | **mine** | a seven-line shim; see below |
+| `third_party/lichess-bot/` | **lichess-bot devs** | the bridge between the Lichess Bot API and a chess engine. AGPL-3.0 |
+| `third_party/stockfish/` | **Stockfish devs** | Stockfish, used only as a sparring partner and as a referee for generating test positions. GPL-3.0. Never a source of code, weights or search output for the engine |
+
+Full attribution, versions and licence terms: [`THIRD-PARTY.md`](THIRD-PARTY.md).
+
+### Why `lichess-bot.py` is at the top level
+
+lichess-bot expects the bot author to supply two modules — the engine class it
+drives and whatever that class needs — and to import them as top-level
+modules, while the author in turn imports from `lib.`. The dependency runs
+both ways, so the shim at the root puts both `third_party/lichess-bot/` and
+the repository root on `sys.path` and then hands over. That keeps the start
+command unchanged and `lib/` where it belongs, under `third_party/`.
+
+The one edit made to upstream code is marked in place: the version file is
+read relative to its own module rather than to the working directory, because
+it no longer sits one level under the directory the bot is started from.
+
+---
+
+## Running the bot
+
+```
+pip install -r requirements.txt
+python engine/build.py
+python lichess-bot.py
+```
+
+`config.yml` is **not** in the repository — it holds a Lichess API token.
+Copy the upstream example from
+[lichess-bot](https://github.com/lichess-bot-devs/lichess-bot) and set:
 
 ```yaml
-  ponder: true         # think on the opponent's clock
+engine:
+  protocol: "homemade"
+  name: "MyEngine"
   homemade_options:
-    Hash: 256          # transposition table size in MB
-    Threads: 7         # search threads (Lazy SMP)
-    EvalMode: blend    # hce | nnue | blend; blend is the strongest
+    Hash: 1024          # transposition table, MB
+    Threads: 6          # search threads (Lazy SMP); at or below physical cores
+    EvalMode: blend     # hce | nnue | blend -- blend is the strongest
 ```
 
-The evaluation network lives in [`nnue/`](nnue/README.md) — a perspective
-`(768 -> 1024) x 2 -> 1` net with SCReLU and output buckets, trained on the
-lichess evaluation dump, with the data pipeline and the checks that keep its
-incremental accumulator honest.
+The engine needs no network access and no other engine. The only outside data
+it uses at play time is the Polyglot opening book, which lichess-bot handles
+itself (`engine: polyglot:` in `config.yml`), and `engine/net3.bin`.
 
-```
-sh nnue/run_extract.sh 7                        # the dump -> training records
-.venv2/Scripts/python nnue/train.py --epochs 5  # train (needs torch + a GPU)
-.venv2/Scripts/python nnue/export.py            # -> engine/net2.bin
-python nnue/verify.py                           # the accumulator is correct
-```
+## Playing the engine on its own
 
-[`testsuite/`](testsuite/README.md) measures the engine: the standard
-benchmarks, and matches against a ladder of Stockfish strengths that produce an
-Elo estimate.
+`engine/ce.exe` is an ordinary UCI engine and works with any GUI or with
+cutechess. It also answers `bench N`, `perft N`, `eval` and `tune` as
+commands. The development build defaults to 64 MB hash, one thread and
+`EvalMode=hce`; the [CCRL release build](ccrl/README.md) defaults to 256 MB,
+one thread and `blend`, and carries the network inside the executable.
 
-```
-python testsuite/run.py selftest   # perft, mates, drawn endings, the clock
-python testsuite/run.py benchmarks # speed and tactics
-python testsuite/run.py elo        # play Stockfish until the rating settles
-```
+## Licence
 
-## Overview
-
-[lichess-bot](https://github.com/lichess-bot-devs/lichess-bot) is a free bridge
-between the [Lichess Bot API](https://lichess.org/api#tag/Bot) and chess engines.
-
-With lichess-bot, you can create and operate a bot on lichess. Your bot will be able to play against humans and bots alike, and you will be able to view these games live on lichess.
-
-See also the lichess-bot [documentation](https://github.com/lichess-bot-devs/lichess-bot/wiki) for further usage help.
-
-## Features
-Supports:
-- Every variant and time control
-- UCI, XBoard, and Homemade engines
-- Matchmaking (challenging other bots)
-- Offering Draws and Resigning
-- Accepting move takeback requests from opponents
-- Saving games as PGN
-- Local & Online Opening Books
-- Local & Online Endgame Tablebases
-
-Can run on:
-- Python 3.9 and later
-- Windows, Linux and MacOS
-- Docker
-
-## Steps
-1. [Install lichess-bot](https://github.com/lichess-bot-devs/lichess-bot/wiki/How-to-Install)
-2. [Create a lichess OAuth token](https://github.com/lichess-bot-devs/lichess-bot/wiki/How-to-create-a-Lichess-OAuth-token)
-3. [Setup the engine](https://github.com/lichess-bot-devs/lichess-bot/wiki/Setup-the-engine)
-4. [Configure lichess-bot](https://github.com/lichess-bot-devs/lichess-bot/wiki/Configure-lichess-bot)
-5. [Upgrade to a BOT account](https://github.com/lichess-bot-devs/lichess-bot/wiki/Upgrade-to-a-BOT-account)
-6. [Run lichess-bot](https://github.com/lichess-bot-devs/lichess-bot/wiki/How-to-Run-lichess%E2%80%90bot)
-
-## Advanced options
-- [Create a homemade engine](https://github.com/lichess-bot-devs/lichess-bot/wiki/Create-a-homemade-engine)
-- [Add extra customizations](https://github.com/lichess-bot-devs/lichess-bot/wiki/Extra-customizations)
-
-<br />
-
-## Acknowledgements
-Thanks to the Lichess team, especially T. Alexander Lystad and Thibault Duplessis for working with the LeelaChessZero team to get this API up. Thanks to the [Niklas Fiekas](https://github.com/niklasf) and his [python-chess](https://github.com/niklasf/python-chess) code which allows engine communication seamlessly.
-
-## License
-lichess-bot is licensed under the AGPLv3 (or any later version at your option). Check out the [LICENSE file](https://github.com/lichess-bot-devs/lichess-bot/blob/master/LICENSE) for the full text.
-
-## Citation
-If this software has been used for research purposes, please cite it using the "Cite this repository" menu on the right sidebar. For more information, check the [CITATION file](https://github.com/lichess-bot-devs/lichess-bot/blob/master/CITATION.cff).
+uiagBot is **AGPL-3.0** — see [`LICENSE`](LICENSE). It inherits that from
+lichess-bot, whose code it links against. The vendored Stockfish under
+`third_party/stockfish/` is GPL-3.0 and carries its own licence text; it is a
+separate program that this project merely runs, and nothing from it is
+compiled into the engine.

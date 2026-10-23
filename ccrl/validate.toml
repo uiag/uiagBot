@@ -1,0 +1,123 @@
+# testsuite configuration for the CCRL release binary.
+#
+# Points the existing testsuite at ccrl/dist/, so the exact file that would be
+# submitted is the one that gets checked -- not engine/ce.exe, which is built
+# with different flags, reads its network off the disk and defaults to a
+# different evaluation.
+#
+#   python testsuite/run.py --config ccrl/validate.toml --no-save selftest
+#   python testsuite/run.py --config ccrl/validate.toml --no-save timing
+#   python testsuite/run.py --config ccrl/validate.toml --no-save match sf-2600 -n 20
+#
+# Build it first:  python ccrl/build.py
+#
+# --no-save keeps these runs out of testsuite/results/, which holds the
+# development engine's measurement history; a release check is not part of it.
+
+[paths]
+results = "testsuite/results"
+suites  = "testsuite/suites"
+
+[defaults]
+time_control = "30+2"
+concurrency = 4
+# The release build asks the clock for 50 ms of its own (Move Overhead), so
+# the harness does not have to be as generous as it is with engine/ce.exe.
+move_overhead_ms = 120
+
+# ------------------------------------------------------------- the engine
+# The submission binary, with the options CCRL would use: 256 MB hash, one
+# core.  Nothing sets EvalMode -- the point is to check that the release
+# default is already the strongest one.
+[engine]
+name    = "uiagBot-ccrl"
+command = "ccrl/dist/uiagBot-1.3/uiagBot-1.3-avx2.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 256, Threads = 1 }
+
+# The pre-AVX2 fallback, so it can be checked the same way:
+#   python testsuite/run.py --config ccrl/validate.toml --no-save --engine uiagBot-popcnt selftest
+[[opponent]]
+name    = "uiagBot-popcnt"
+command = "ccrl/dist/uiagBot-1.3/uiagBot-1.3-popcnt.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 256, Threads = 1 }
+note    = "unrated: the SSE4.2 fallback build"
+
+# The development build, for an A/B against the release one.
+[[opponent]]
+name    = "ce-dev"
+command = "engine/ce.exe"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 256, Threads = 1, EvalMode = "blend" }
+note    = "unrated: the build that plays on lichess, same settings"
+
+[referee]
+name    = "referee"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+perft_command = "go perft"
+bench_command = "bench 16 1"
+options = { Threads = 4, Hash = 1024 }
+
+# ---------------------------------------------------------- the opponents
+# A short ladder, enough to put a number on the strength estimate the
+# submission has to quote.  The ratings are Stockfish's own UCI_Elo scale,
+# which is not the CCRL scale -- see ccrl/SUBMISSION.md.
+[[opponent]]
+name = "sf-2400"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2400
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2400 }
+
+[[opponent]]
+name = "sf-2600"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2600
+options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2600 }
+
+[[opponent]]
+name = "sf-2800"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 2800
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2800 }
+
+[[opponent]]
+name = "sf-3000"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3000
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3000 }
+
+[[opponent]]
+name = "sf-3190"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+elo = 3190
+options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3190 }
+
+# Full strength, one thread.  This is the only opponent here that is itself on
+# the CCRL list, so it is the only one that can anchor a CCRL-scale estimate
+# rather than a Stockfish-UCI_Elo-scale one.  No `elo` field: the number to use
+# is CCRL's own rating for this version, which you have to look up, and a guess
+# baked in here would quietly poison the fit.
+#
+#   python testsuite/run.py --config ccrl/validate.toml --no-save \
+#       gauntlet --opponents sf-full -n 30 --tc 30+0.3 -c 4
+#
+[[opponent]]
+name = "sf-full"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
+options = { Threads = 1, Hash = 256, "Move Overhead" = 50 }
+note = "unrated: Stockfish 19 at full strength, one thread"
+
+# ---------------------------------------------------- when to stop a game
+[adjudication]
+max_plies      = 400
+draw_enabled   = true
+draw_plies     = 10
+draw_score     = 8
+draw_after_ply = 100
+resign_enabled = true
+resign_plies   = 6
+resign_score   = 400

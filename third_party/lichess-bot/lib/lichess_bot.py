@@ -68,7 +68,13 @@ class VersioningType(TypedDict):
 
 logger = logging.getLogger(__name__)
 
-with open("lib/versioning.yml") as version_file:
+# Local change (uiagBot): resolved against this file rather than the working
+# directory.  Upstream reads "lib/versioning.yml", which only works when the
+# bot is started from the directory directly above lib/; this copy lives under
+# third_party/lichess-bot/ and is started from the repository root.
+_VERSIONING_YML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "versioning.yml")
+with open(_VERSIONING_YML) as version_file:
     versioning_info: VersioningType = yaml.safe_load(version_file)
 
 __version__ = versioning_info["lichess_bot_version"]

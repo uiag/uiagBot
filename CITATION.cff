@@ -1,36 +1,55 @@
-# This CITATION.cff file was generated with cffinit.
-# Visit https://bit.ly/cffinit to generate yours today!
-
 cff-version: 1.2.0
-title: lichess-bot
+title: uiagBot
 message: >-
-  If you use this software, please cite it using the
-  metadata from this file.
+  If you use this software, please cite it using the metadata from this file.
 type: software
 authors:
-  - given-names: Ioannis
-    family-names: Pantidis
-  - given-names: Mark
-    family-names: Harrison
-    orcid: 'https://orcid.org/0000-0001-7212-8810'
-  - given-names: Shail
-    family-names: Choksi
-  - given-names: Thibault
-    family-names: Duplessis
-    affiliation: lichess.org
-repository-code: 'https://github.com/lichess-bot-devs/lichess-bot'
+  - given-names: Jakob
+    family-names: Maisch
+repository-code: 'https://github.com/uiag/uiagBot'
 abstract: >-
-  lichess-bot is a free bridge between the Lichess Bot API
-  and chess engines.
-
-  With lichess-bot, you can create and operate a bot on
-  lichess. Your bot will be able to play against humans and
-  bots alike, and you will be able to view these games live
-  on lichess.
+  uiagBot is a UCI chess engine written from scratch in C, with a bitboard
+  move generator, a PVS search with modern pruning and Lazy SMP, and a choice
+  of a hand-crafted evaluation or a (768 -> 1024) x 2 -> 1 perspective
+  network with SCReLU, king-bucketed inputs and output buckets, trained from
+  scratch on the public Lichess evaluation dump. The repository also contains
+  the network's training pipeline, the test harness every change was measured
+  with, and the bot that plays the engine on Lichess.
 keywords:
   - chess
   - chess engine
+  - UCI
+  - NNUE
   - lichess
-  - API
-  - game
 license: AGPL-3.0
+references:
+  - type: software
+    title: lichess-bot
+    version: 2025.2.6.1
+    repository-code: 'https://github.com/lichess-bot-devs/lichess-bot'
+    license: AGPL-3.0
+    notes: >-
+      Vendored under third_party/lichess-bot/ and used as the bridge to the
+      Lichess Bot API. See THIRD-PARTY.md.
+    authors:
+      - given-names: Ioannis
+        family-names: Pantidis
+      - given-names: Mark
+        family-names: Harrison
+        orcid: 'https://orcid.org/0000-0001-7212-8810'
+      - given-names: Shail
+        family-names: Choksi
+      - given-names: Thibault
+        family-names: Duplessis
+        affiliation: lichess.org
+  - type: software
+    title: Stockfish
+    version: '19'
+    repository-code: 'https://github.com/official-stockfish/Stockfish'
+    license: GPL-3.0
+    notes: >-
+      Vendored under third_party/stockfish/ and used only as a sparring
+      partner and as a referee for generating test positions. No Stockfish
+      code or network weights are part of the engine. See THIRD-PARTY.md.
+    authors:
+      - name: The Stockfish developers

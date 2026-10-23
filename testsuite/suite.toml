@@ -38,7 +38,7 @@ options = { Hash = 1024, Threads = 6, EvalMode = "blend" }
 # EPD files.  It never plays rated games.
 [referee]
 name    = "referee"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 perft_command = "go perft"
 bench_command = "bench 16 1"
 options = { Threads = 4, Hash = 1024 }
@@ -54,163 +54,163 @@ options = { Threads = 4, Hash = 1024 }
 
 [[opponent]]
 name = "sf-1320"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1320
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1320 }
 
 [[opponent]]
 name = "sf-1400"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1400
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1400 }
 
 [[opponent]]
 name = "sf-1500"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1500
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1500 }
 
 [[opponent]]
 name = "sf-1600"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1600
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1600 }
 
 [[opponent]]
 name = "sf-1700"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1700
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1700 }
 
 [[opponent]]
 name = "sf-1800"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1800
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1800 }
 
 [[opponent]]
 name = "sf-1900"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 1900
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 1900 }
 
 [[opponent]]
 name = "sf-2000"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2000
 options = { Threads = 1, Hash = 32, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2000 }
 
 [[opponent]]
 name = "sf-2100"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2100
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2100 }
 
 [[opponent]]
 name = "sf-2200"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2200
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2200 }
 
 [[opponent]]
 name = "sf-2300"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2300
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2300 }
 
 [[opponent]]
 name = "sf-2400"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2400
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2400 }
 
 [[opponent]]
 name = "sf-2500"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2500
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2500 }
 
 [[opponent]]
 name = "sf-2550"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2550
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2550 }
 
 [[opponent]]
 name = "sf-2600"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2600
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2600 }
 
 [[opponent]]
 name = "sf-2650"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2650
 options = { Threads = 1, Hash = 64, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2650 }
 
 [[opponent]]
 name = "sf-2700"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2700
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2700 }
 
 [[opponent]]
 name = "sf-2750"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2750
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2750 }
 
 [[opponent]]
 name = "sf-2800"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2800
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2800 }
 
 [[opponent]]
 name = "sf-2850"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2850
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2850 }
 
 [[opponent]]
 name = "sf-2900"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2900
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2900 }
 
 [[opponent]]
 name = "sf-2950"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 2950
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 2950 }
 
 [[opponent]]
 name = "sf-3000"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 3000
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3000 }
 
 [[opponent]]
 name = "sf-3050"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 3050
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3050 }
 
 [[opponent]]
 name = "sf-3100"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 3100
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3100 }
 
 [[opponent]]
 name = "sf-3150"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 3150
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3150 }
 
 [[opponent]]
 name = "sf-3190"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 elo = 3190
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = true, UCI_Elo = 3190 }
 
@@ -219,7 +219,7 @@ options = { Threads = 1, Hash = 128, "Move Overhead" = 50, UCI_LimitStrength = t
 # would poison the fit.  Add `elo = ...` yourself if you want it counted.
 [[opponent]]
 name = "sf-full"
-command = "stockfish/stockfish-windows-x86-64-universal.exe"
+command = "third_party/stockfish/stockfish-windows-x86-64-universal.exe"
 options = { Threads = 1, Hash = 128, "Move Overhead" = 50 }
 note = "unrated: full strength, excluded from the Elo fit"
 
