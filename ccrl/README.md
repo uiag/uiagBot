@@ -20,10 +20,8 @@ ccrl/dist/uiagBot-1.3/uiagBot-1.3-avx2.exe      <- the file to submit
 ccrl/dist/uiagBot-1.3/uiagBot-1.3-popcnt.exe    <- pre-AVX2 fallback
 ccrl/dist/uiagBot-1.3/readme.txt
 ccrl/dist/uiagBot-1.3/LICENSE
-ccrl/dist/uiagBot-1.3.zip                       <- upload this
+ccrl/dist/uiagBot-1.3.zip                       
 ```
-
-Then follow [`SUBMISSION.md`](SUBMISSION.md), which is the forum post itself.
 
 ## What CCRL requires, and where each requirement is met
 
