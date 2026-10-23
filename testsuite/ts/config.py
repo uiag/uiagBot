@@ -168,7 +168,7 @@ class EngineSpec:
     def resolved_workdir(self) -> str:
         if self.workdir:
             return _abspath(self.workdir)
-        # Default to the binary's own directory: ce.exe loads net.bin from the
+        # Default to the binary's own directory: ce.exe loads net3.bin from the
         # current directory, so this makes EvalMode=nnue work unprompted.
         return os.path.dirname(self.resolved_command()[0]) or ROOT
 

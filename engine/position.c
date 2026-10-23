@@ -191,8 +191,6 @@ void pos_update_state(Position *pos) {
     st->pinners[1] = pos->pinners[1];
 }
 
-int pos_in_check(const Position *pos) { return pos->checkers != 0; }
-
 int pos_non_pawn_pieces(const Position *pos, int c) {
     return popcount(pos->byColor[c] & ~(pos->byType[PAWN] | pos->byType[KING]));
 }
@@ -354,7 +352,6 @@ void pos_do_move(Position *pos, Move m) {
     pos->histCount++;
     StateInfo *st = &pos->st[pos->histCount];
     st->move = m;
-    st->eval = VALUE_NONE;
 
     pos->key ^= ZobristSide;
     if (pos->ep != SQ_NONE) {
@@ -478,7 +475,6 @@ void pos_do_null(Position *pos) {
     StateInfo *st = &pos->st[pos->histCount];
     st->move = MOVE_NULL;
     st->captured = NO_PIECE;
-    st->eval = VALUE_NONE;
 
     pos->key ^= ZobristSide;
     if (pos->ep != SQ_NONE) {
@@ -596,13 +592,6 @@ int pos_has_game_cycle(const Position *pos, int ply) {
         if (piece_color(pos->board[occupied]) != pos->side) continue;
         return 1;
     }
-    return 0;
-}
-
-int pos_has_repeated(const Position *pos) {
-    int end = pos->halfmove < pos->histCount ? pos->halfmove : pos->histCount;
-    for (int i = 4; i <= end; i += 2)
-        if (pos->st[pos->histCount - i].key == pos->key) return 1;
     return 0;
 }
 
@@ -779,7 +768,6 @@ static int set_fen(Position *pos, const char *fen) {
     st->pliesFromNull = pos->pliesFromNull;
     st->captured = NO_PIECE;
     st->move = MOVE_NONE;
-    st->eval = VALUE_NONE;
     pos_update_state(pos);
     return 1;
 }

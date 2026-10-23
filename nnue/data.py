@@ -19,6 +19,8 @@ import os
 import numpy as np
 import torch
 
+import arch
+
 REC = np.dtype([
     ("occ", "<u8"),
     ("pieces", "u1", 16),
@@ -95,17 +97,36 @@ def decode(batch: np.ndarray, cap: int, drop_mates: bool = False):
     ptype = (code % 6).astype(np.int32)          # 0 pawn .. 5 king
 
     stm = batch["stm"].astype(np.int32)[:, None]  # 0 white to move
-    # From the mover's point of view: own pieces in the first 384 planes, and
-    # the board flipped when the mover is Black.
+
+    # Each perspective sees the board in its own orientation, folded onto
+    # files a-d by its own king's file, and indexes the copy of the 768 planes
+    # that belongs to its own king's region.  `wksq`/`bksq` are in the record,
+    # so none of this costs a scan of the board.
+    wk = batch["wksq"].astype(np.int32)[:, None]
+    bk = batch["bksq"].astype(np.int32)[:, None]
+    us_k = np.where(stm == 1, bk, wk)        # the king of the side to move
+    them_k = np.where(stm == 1, wk, bk)
+
+    kb_table = np.asarray(arch.KING_BUCKET_TABLE, dtype=np.int32)
+
+    def view(persp_k, persp_is_black, own):
+        """Indices for one perspective."""
+        # own-relative orientation: Black flips the board vertically
+        k_rel = np.where(persp_is_black, persp_k ^ 56, persp_k)
+        sq_rel = np.where(persp_is_black, sq ^ 56, sq)
+        # fold onto files a-d by the king's file
+        mirror = (k_rel % 8) >= 4
+        sq_rel = np.where(mirror, sq_rel ^ 7, sq_rel)
+        kbucket = kb_table[np.where(mirror, k_rel ^ 7, k_rel)]
+        return (kbucket * arch.NUM_PLANES
+                + (1 - own) * 384 + ptype * 64 + sq_rel)
+
     own_us = (colour == stm).astype(np.int32)
-    sq_us = np.where(stm == 1, sq ^ 56, sq)
-    idx_us = (1 - own_us) * 384 + ptype * 64 + sq_us
-
     own_them = (colour != stm).astype(np.int32)
-    sq_them = np.where(stm == 1, sq, sq ^ 56)
-    idx_them = (1 - own_them) * 384 + ptype * 64 + sq_them
+    idx_us = view(us_k, stm == 1, own_us)
+    idx_them = view(them_k, stm == 0, own_them)
 
-    pad = np.int32(768)
+    pad = np.int32(arch.KING_BUCKETS * arch.NUM_PLANES)
     idx_us = np.where(occupied, idx_us, pad)
     idx_them = np.where(occupied, idx_them, pad)
 

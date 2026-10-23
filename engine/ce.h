@@ -166,7 +166,6 @@ typedef struct {
     int  halfmove;
     int  pliesFromNull;       /* plies since the last null move */
     int  captured;            /* piece code captured by the move leading here */
-    int  eval;                /* cached static eval, or VALUE_NONE */
     Move move;                /* move that led to this state */
 } StateInfo;
 
@@ -212,13 +211,11 @@ void pos_undo_move(Position *pos, Move m);
 void pos_do_null(Position *pos);
 void pos_undo_null(Position *pos);
 U64  pos_attackers_to(const Position *pos, int sq, U64 occ);
-int  pos_in_check(const Position *pos);
 int  pos_legal(const Position *pos, Move m);
 int  pos_pseudo_legal(const Position *pos, Move m);
 int  pos_gives_check(const Position *pos, Move m);
 int  pos_see_ge(const Position *pos, Move m, int threshold);
 int  pos_is_draw(const Position *pos);
-int  pos_has_repeated(const Position *pos);
 /* Is there a move available here that walks into a position already seen?
  * Such a move is worth at least a draw, which the search can claim without
  * searching for it. */
@@ -357,6 +354,17 @@ typedef struct Thread {
     int16_t  contHist[PIECE_NB][64][PIECE_NB * 64];
     Move     counterMove[PIECE_NB][64];
 
+    /* Quiet-move history keyed on the pawn structure.  The from/to table
+     * cannot tell a knight manoeuvre in a closed centre from the same squares
+     * in an open one, and the continuation tables only see the last few plies;
+     * the pawn hash is the cheapest description of "this kind of position"
+     * that survives a transposition.  Deliberately small and lossy -- the
+     * index is the low bits of the pawn key with no verification, so entries
+     * collide, which is what makes it generalise. */
+#define PAWN_HIST_SIZE 512
+#define PAWN_HIST_MASK (PAWN_HIST_SIZE - 1)
+    int16_t  pawnHist[PAWN_HIST_SIZE][PIECE_NB][64];
+
 #define CORR_SIZE 16384
 #define CORR_MASK (CORR_SIZE - 1)
     int16_t  pawnCorrHist[COLOR_NB][CORR_SIZE];
@@ -422,7 +430,6 @@ typedef struct {
 } TuneParam;
 
 const TuneParam *tune_params(void);
-int  tune_count(void);
 int  tune_set(const char *name, int value);
 int  tune_get(const char *name, int *out);
 void tune_print_uci_options(void);

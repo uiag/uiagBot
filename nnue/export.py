@@ -26,13 +26,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-from arch import (L1, OUTPUT_BUCKETS, NUM_PLANES, PAD_INDEX, QA, QB,  # noqa: E402
-                  SCALE, WEIGHT_CLIP)
+from arch import (KING_BUCKETS, L1, OUTPUT_BUCKETS, NUM_PLANES,  # noqa: E402
+                  PAD_INDEX, QA, QB, SCALE, WEIGHT_CLIP)
+
+NUM_FEATURES = KING_BUCKETS * NUM_PLANES
 
 
 def main() -> int:
     src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "net.pt")
-    dst = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "engine", "net2.bin")
+    dst = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "engine", "net3.bin")
     if not os.path.isfile(src):
         print(f"no network at {src}")
         return 1
@@ -51,7 +53,7 @@ def main() -> int:
         return 1
 
     # The padding row is never active; it is dropped rather than stored.
-    ft_w = ft_w[:NUM_PLANES]
+    ft_w = ft_w[:NUM_FEATURES]
 
     def report(name: str, a: np.ndarray, scale: int) -> None:
         q = np.rint(a * scale)
@@ -88,9 +90,14 @@ def main() -> int:
                          "tighter weight clip")
 
     with open(dst, "wb") as f:
-        f.write(b"CEN2")
-        f.write(struct.pack("<IIIIiif", 2, NUM_PLANES, L1, OUTPUT_BUCKETS,
-                            QA, QB, SCALE))
+        # CEN3 adds the king-bucket count.  The magic changes with it so that
+        # an engine built for one format cannot silently read the other: the
+        # layouts differ only in how many copies of the 768 planes follow, so
+        # a version check alone would load a CEN2 net as a one-bucket CEN3 and
+        # evaluate perfectly plausible nonsense.
+        f.write(b"CEN3")
+        f.write(struct.pack("<IIIIIiif", 3, NUM_PLANES, KING_BUCKETS, L1,
+                            OUTPUT_BUCKETS, QA, QB, SCALE))
         f.write(ft_wq.tobytes(order="C"))
         f.write(ft_bq.tobytes())
         f.write(out_wq.tobytes(order="C"))

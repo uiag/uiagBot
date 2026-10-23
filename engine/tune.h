@@ -28,11 +28,40 @@
     TUNE(LmrHistMax,        2048,   512,  8192)  /* cap, in 1/1024 ply */     \
     /* The same idea for captures, which had no history term at all: a        \
      * capture that has been refuted everywhere else is worth less of a look  \
-     * than one that keeps working.  0 disables it. */                        \
-    TUNE(LmrCaptHistDiv,       0,     0, 32000)                               \
+     * than one that keeps working.  0 disables it.                           \
+     *                                                                        \
+     * This was off for a long time and measuring it would have been a waste  \
+     * of a match, because the history it read was indexed by the wrong       \
+     * piece: `captured_type` was called after the move had been made, so it  \
+     * named the piece standing on the destination square -- the mover -- and \
+     * not the one it had just taken.  In range, so nothing ever crashed; it  \
+     * simply read a bucket belonging to some other capture.  With that       \
+     * fixed it is worth +11.6 +/- 7.4 Elo over 4000 games against the        \
+     * single-bucket network.                                                 \
+     *                                                                        \
+     * Against the king-bucket network it is worth less -- +6.2 +/- 7.4 at    \
+     * 25k nodes and +4.3 +/- 8.3 at 40k, pooling to +5.4 +/- 5.5 -- which    \
+     * is the expected direction: an evaluation that already orders captures  \
+     * well leaves a history correction less to do.  Kept on three positive   \
+     * samples and a mechanism (the tree is 7.7% smaller to the same depth),  \
+     * not on a single significant result. */                                 \
+    TUNE(LmrCaptHistDiv,    6000,     0, 32000)                               \
     TUNE(LmrCutoffCnt,         3,     1,    16)                               \
     TUNE(LmrDeeperMargin,     70,    10,   300)  /* re-search one ply deeper */\
     TUNE(QuietBonusMargin,    60,    10,   300)  /* extra history on a rout */ \
+    /* Reduction relief for checks.  These were two separate lines that were  \
+     * the same condition: `givesCheck` and, after the move had been made,    \
+     * `pos->checkers`.  A checking move therefore got two plies of relief    \
+     * while the code read as one each.                                       \
+     *                                                                        \
+     * The default keeps the old behaviour, and that is a measurement rather  \
+     * than inertia.  Writing what the code appears to mean (1, 0) is worth   \
+     * +1.3 +/- 11.8; writing what the second line was probably *for* (1, 1)  \
+     * is worth +7.3 +/- 7.5 on its own -- but stacked on LmrCaptHistDiv it   \
+     * drops the pair to +1.7 +/- 7.4 against that switch's own +11.6.  Both  \
+     * hand reductions back, and the search does not want them twice. */      \
+    TUNE(LmrGivesCheck,        2,     0,     3)                               \
+    TUNE(LmrInCheck,           0,     0,     3)                               \
     /* ---------------- shallow pruning ---------------- */                    \
     TUNE(RfpMargin,           85,    20,   200)                               \
     TUNE(RfpMaxDepth,          9,     3,    16)                               \
@@ -48,14 +77,31 @@
     TUNE(SeePruneNoisy,       95,    20,   300)                               \
     TUNE(QsFutilityMargin,   180,    40,   500)                               \
     TUNE(QsSeeMargin,         75,     0,   300)                               \
+    /* Futility pruning of captures.  Quiet moves have had this for a while;  \
+     * a capture that cannot raise alpha even once the piece is in the bag is \
+     * the same bet.  0 disables it, which is the default until measured. */  \
+    TUNE(FutilityCaptBase,     0,     0,   600)                               \
+    TUNE(FutilityCaptMult,   130,    20,   500)                               \
+    TUNE(FutilityCaptDepth,    7,     2,    12)                               \
+    /* The depth bounds the pruning used to hard-code.  They are here so a    \
+     * tuner can reach them; the defaults are the values that were inlined. */\
+    TUNE(RazorMaxDepth,        6,     2,    12)                               \
     /* ---------------- null move / probcut ---------------- */                \
     TUNE(NmpBase,              4,     2,     8)                               \
     TUNE(NmpDepthDiv,          6,     2,    16)                               \
     TUNE(NmpEvalDiv,         200,    50,   600)                               \
     TUNE(NmpMargin,          330,     0,  1000)                               \
     TUNE(NmpMarginDepth,      21,     0,    80)                               \
+    TUNE(NmpMinDepth,          3,     2,     8)                               \
+    TUNE(NmpVerifyDepth,      14,     6,    30)                               \
     TUNE(ProbcutMargin,      185,    50,   500)                               \
     TUNE(ProbcutImproving,    55,     0,   200)                               \
+    TUNE(ProbcutMinDepth,      5,     3,    10)                               \
+    TUNE(ProbcutReduction,     4,     2,     8)                               \
+    /* internal iterative reduction: the depth at which a missing TT move     \
+     * starts to cost a ply, separately for PV and cut nodes */               \
+    TUNE(IirPvDepth,           3,     2,    10)                               \
+    TUNE(IirCutDepth,          8,     4,    16)                               \
     /* ---------------- extensions ---------------- */                         \
     TUNE(SingularMinDepth,     6,     4,    12)                               \
     TUNE(SingularMargin,      56,    10,   200)                               \
@@ -69,15 +115,85 @@
     TUNE(CorrWMinor,          50,     0,   256)                               \
     TUNE(CorrWMajor,          44,     0,   256)                               \
     TUNE(CorrWNonPawn,        46,     0,   256)                               \
+    /* ---------------- move ordering ---------------- */                      \
+    /* Capture history's share of the noisy score.  The victim is worth       \
+     * 8 * SeeValue, which is 800 for a pawn and 7800 for a queen, while the  \
+     * history is clamped to +/-10692 -- so at a divisor of 1 a pawn capture  \
+     * with saturated history sorts above a fresh queen capture.  Stockfish   \
+     * keeps the same clamp and divides by 16.  1 is what this engine has     \
+     * always done; the divisor exists to find out whether that was right. */ \
+    TUNE(CaptHistDiv,          1,     1,    32)                               \
+    /* Pawn-structure history: a quiet-move table keyed on the pawn hash,     \
+     * which generalises "this move is good in this kind of position" across  \
+     * transpositions the from/to and continuation tables cannot see.  Its    \
+     * share of the quiet score, over 128.  0 disables it. */                 \
+    TUNE(PawnHistWeight,       0,     0,   256)                               \
     /* ---------------- aspiration / time ---------------- */                  \
     TUNE(AspInitDelta,        10,     4,    40)                               \
     TUNE(AspScoreDiv,      16384,  2048, 65535)                               \
     TUNE(TimeNodeEffort,     115,    50,   250)                               \
+    /* ---------------- time management ---------------- */                    \
+    /* Everything init_time and the end-of-iteration check used to hard-code.  \
+     * Only TimeNodeEffort and MoveOverhead were ever reachable from here, so  \
+     * the whole of the clock's shape went untuned while the search margins    \
+     * were fitted twice; `spsa.py --groups scaled` is the eval-margin set and \
+     * never touched any of this.  The units are chosen so that every default  \
+     * below is the exact double the literal produced -- a tenth of a percent, \
+     * a percent, or a plain integer -- so a build with nothing set keeps the  \
+     * clock it had.                                                           \
+     *                                                                         \
+     * Sudden death (no movestogo), which is every control the bot plays:      \
+     *   optScale = min(TmOptBase/1e4 + (ply+3)^(TmOptPlyExp/100) * ...        \
+     *                  TmOptPlyMult/1e4,  TmOptFrac/1000 * time/timeLeft)     \
+     *   maxScale = min(TmMaxBase/100 + ply/TmMaxPlyDiv, TmMaxCap/100)         \
+     */                                                                        \
+    TUNE(TmOptBase,          120,    40,   400)  /* x 1/10000 */               \
+    TUNE(TmOptPlyMult,        39,    10,   150)  /* x 1/10000 */               \
+    TUNE(TmOptPlyExp,         45,    20,    90)  /* x 1/100 */                 \
+    TUNE(TmOptFrac,          200,    80,   500)  /* x 1/1000 */                \
+    TUNE(TmMaxBase,          300,   150,   600)  /* x 1/100 */                 \
+    TUNE(TmMaxPlyDiv,         14,     4,    40)                                \
+    TUNE(TmMaxCap,           500,   200,  1000)  /* x 1/100 */                 \
+    /* With movestogo, which lichess does not send but a GUI may */            \
+    TUNE(TmMtgOpt,            88,    40,   150)  /* x 1/100 */                 \
+    TUNE(TmMtgMaxBase,       150,    80,   400)  /* x 1/100 */                 \
+    TUNE(TmMtgMaxMult,        11,     2,    40)  /* x 1/100, per move to go */ \
+    /* Never commit more than this share of the clock to one move.  Without    \
+     * it one long iteration late in a fast game loses on time. */             \
+    TUNE(TmClockCap,          45,    15,    80)  /* x 1/100 */                 \
+    /* The end-of-iteration factor.  A root move that keeps being the best     \
+     * one needs less time; a score that fell needs more. */                   \
+    TUNE(TmStabBase,         122,    80,   200)  /* x 1/100 */                 \
+    TUNE(TmStabStep,           6,     0,    20)  /* x 1/100, per stable iter */\
+    TUNE(TmStabMax,            8,     1,    20)  /* iterations counted */      \
+    TUNE(TmDropMargin1,       40,    10,   200)                                \
+    TUNE(TmDropMult1,        115,   100,   200)  /* x 1/100 */                 \
+    TUNE(TmDropMargin2,      120,    40,   400)                                \
+    TUNE(TmDropMult2,        125,   100,   250)  /* x 1/100 */                 \
+    TUNE(TmRiseMargin,        60,    10,   300)                                \
+    TUNE(TmRiseMult,          92,    50,   100)  /* x 1/100 */                 \
+    TUNE(TmSingleMove,        35,     5,   100)  /* x 1/100, only one legal */ \
+    TUNE(TmEffortMult,        45,     0,   150)  /* x 1/100 */                 \
+    TUNE(TmFactorMin,         20,     5,    80)  /* x 1/100, floor */          \
+    /* Check the soft limit inside an iteration too, not only between them.    \
+     * Only MaximumTime applied in between, and that is three to five times    \
+     * OptimumTime, so one long iteration overshoots the soft target by that   \
+     * much.  This is the share of the soft limit, in percent, at which an     \
+     * iteration already past its first root move gives up; 0 disables it and  \
+     * restores the old between-iterations-only behaviour. */                  \
+    TUNE(TmSoftInIter,         0,     0,   300)  /* x 1/100 of soft limit */   \
+    /* Lazy SMP: how much to widen a helper thread's aspiration window, in    \
+     * sixteenths, so the threads diverge from something other than the       \
+     * shared table alone.  0 leaves every thread searching identically. */   \
+    TUNE(SmpJitter,            0,     0,    48)                               \
     /* Milliseconds held back from the clock for everything that is not the    \
      * search: the pipe, the scheduler, and whatever the host adds.  25 is     \
      * right for a local tournament manager.  Over the network lichess-bot     \
-     * already subtracts its own `move_overhead` (a second by default) before  \
-     * the clock reaches the engine, so this does not have to cover that. */   \
+     * subtracts its own `move_overhead` as well, plus a per-move measurement  \
+     * of how long it took to receive the opponent's move, so this does not    \
+     * have to cover the network.  `move_overhead` in config.yml is 100 now    \
+     * rather than the shipped 1000 -- see the note there for the latency it   \
+     * was measured against -- so the two together hold back 125 ms. */        \
     TUNE(MoveOverhead,        25,     0,  1000)                               \
     /* a switch, so the feature can be measured by turning it off */           \
     TUNE(UseCuckoo,            1,     0,     1)                               \
@@ -134,6 +250,14 @@
     TUNE(ConnectedRooks,      11,     0,    80)                               \
     TUNE(KingOpenFile,        36,     0,   100)                               \
     TUNE(RookOn7th,            1,     0,     1)  /* 1 = require a target */    \
+    /* Endgame scale factors beyond the bare-defence cases: opposite bishops  \
+     * with other pieces still on, a single-rook ending one pawn up, and a    \
+     * defending king that stands in front of everything the strong side has  \
+     * left.  All three are Stockfish 11's.  0 keeps the old set. */          \
+    TUNE(ScaleEndgames,        0,     0,     1)                               \
+    TUNE(ScaleOppBishopPc,     3,     0,    12)  /* per piece, added to 22 */  \
+    TUNE(ScaleRookEnding,     48,    16,    64)  /* out of 64 */               \
+    TUNE(ScaleKingInFront,    37,    16,    64)  /* base, + 7 per pawn */      \
     /* ---------------- evaluation: terms taken from Stockfish 11/12 -------- */\
     /* These are the blocks this evaluation did not have at all.  The values   \
      * are Stockfish's own, multiplied by 1.2: its terms are denominated in a  \
@@ -199,7 +323,23 @@
      * win-probability space deliberately compresses large scores. */          \
     TUNE(NnueScale,          154,    50,   400)                               \
     /* EvalMode=blend: the network's share of the mixture, out of 128. */      \
+    /* 96 is where the correlation peaks and it survived a games test: 112    \
+     * is -31 Elo over 1504 games, 64 is -18 over 1200, and 80 is +4.3 +/-    \
+     * 7.6 over 4000, which is not a difference.  See the README. */          \
     TUNE(BlendNnueWeight,     96,     0,   128)                               \
+    /* How far back the accumulator chain may be replayed when the slot one   \
+     * ply up does not hold this position's parent.  1 is the one-move case    \
+     * and nothing more.  Higher values walk further back, reconstructing the  \
+     * boards in between, and cost 2.2 weight rows a ply against the 4.6 a    \
+     * cached rebuild costs -- so the arithmetic says 2 is break-even and 3    \
+     * is already a loss.  Measured, and it is: see the README. */            \
+    TUNE(NnueWalkBack,         1,     1,     8)                               \
+    /* The fifty-move damping the hand-crafted evaluation applies inside      \
+     * taper() never reached the network, so in `nnue` the score did not      \
+     * move as the halfmove clock ran out and in `blend` only the hand-       \
+     * crafted quarter of it did.  1 applies the same (200 - halfmove) / 200  \
+     * to the network's output.  0 is the old behaviour. */                   \
+    TUNE(NnueFiftyDamp,        0,     0,     1)                               \
     /* ---------------- evaluation: piece values ---------------- */            \
     /* per-mille multipliers on the tabulated values, so the tuner can price   \
      * the pieces against each other without touching the tables */            \

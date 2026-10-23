@@ -15,7 +15,6 @@ engine/*.dll
 engine/*.so
 engine/*.exe
 engine/*.o
-engine/net.bin
 
 # training data and per-epoch snapshots (too large for GitHub's 100 MB limit)
 evaluationModel/*.jsonl
@@ -25,9 +24,12 @@ nnue/*.exe
 nnue/*.pt
 nnue/*.bin
 nnue/.scratch
-# engine/net2.bin is deliberately *not* ignored: at 1.5 MB it is small enough
-# to keep, and without it a fresh checkout cannot use EvalMode=nnue at all --
-# exporting it needs torch, which the bot itself does not have.
+# engine/net2.bin and engine/net3.bin are deliberately *not* ignored: without
+# a network a fresh checkout cannot use EvalMode=nnue at all, and exporting
+# one needs torch, which the bot itself does not have.  net3.bin is the king
+# bucket network the engine loads by default (6 MB, still well inside
+# GitHub's 100 MB limit); net2.bin is its 1.5 MB predecessor, kept because it
+# is what every measurement before the buckets was made against.
 engine/net_random.bin
 engine/ce_verify.exe
 

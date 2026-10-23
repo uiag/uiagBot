@@ -48,6 +48,18 @@ POSITIONS = [
      "6k1/6p1/7p/P5P1/1p4KP/2p5/8/8 b - - 0 1"),
     ("kings and pawns only",
      "8/8/3P3k/8/1p6/8/1P6/1K6 w - - 0 1"),
+    # King buckets make a king move a special case of its own: it can change
+    # which copy of the planes its own side indexes, and which way the board
+    # is folded, and when it does, that whole half has to be rebuilt rather
+    # than updated.  The other half must still update by difference, which is
+    # the asymmetry most likely to be got wrong.  Both sides need material or
+    # the lone-king path answers before the network is ever consulted.
+    ("rook ending, kings crossing the fold line",
+     "8/5k2/8/8/8/8/5K2/4R2r w - - 0 1"),
+    ("queen ending, kings off the back rank",
+     "8/4k3/8/8/8/8/4K3/3Q3q w - - 0 1"),
+    ("king walk through every bucket",
+     "8/3k4/3p4/8/8/3P4/3K4/R6r w - - 0 1"),
     ("start position", None),
 ]
 
@@ -56,7 +68,8 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def drive(exe: str, net: str, env: dict, fen, depth: int) -> tuple[int, str, bool]:
+def drive(exe: str, net: str, env: dict, fen, depth: int,
+          walkback: int = 8) -> tuple[int, str, bool]:
     """Search one position and return (nodes, stderr, crashed)."""
     import threading
     import time
@@ -80,7 +93,12 @@ def drive(exe: str, net: str, env: dict, fen, depth: int) -> tuple[int, str, boo
             pass
 
     for cmd in ("uci", "setoption name EvalMode value nnue",
-                "setoption name Threads value 1", "isready",
+                "setoption name Threads value 1",
+                # Drive the accumulator's hardest path on purpose.  At the
+                # default of 1 the chain is only ever replayed one move, and
+                # the multi-ply walk -- which reconstructs the boards in
+                # between by stepping backwards -- would never run at all.
+                f"setoption name NnueWalkBack value {walkback}", "isready",
                 "position startpos" if fen is None else f"position fen {fen}",
                 f"go depth {depth}"):
         send(cmd)

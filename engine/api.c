@@ -511,7 +511,6 @@ static int set_position_from_rec(Position *pos, const EvalRec *r) {
     StateInfo *st = &pos->st[0];
     st->captured = NO_PIECE;
     st->move = MOVE_NONE;
-    st->eval = VALUE_NONE;
     st->ep = SQ_NONE;
     st->key = pos->key;
     st->pawnKey = pos->pawnKey;

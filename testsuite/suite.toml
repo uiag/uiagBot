@@ -232,7 +232,17 @@ draw_score     = 8     # centipawns
 draw_after_ply = 100    # never adjudicate a draw before this ply
 resign_enabled = true
 resign_plies   = 6     # this many consecutive moves below resign_score
-resign_score   = 900   # centipawns, from the losing engine's own point of view
+# In the engine's own units, which are not centipawns: a pawn measures about
+# 77 here (the start position reads 47, and 124 with a black pawn taken off).
+# The old value of 900 was therefore eleven pawns, so the resign rule never
+# fired at all and every lost game was played out to mate -- which is most of
+# why a 4000-game match takes forty minutes rather than twenty-five.  400 is
+# a little over five pawns and is not coming back at this strength.
+#
+# Every result recorded in engine/README.md was measured at 900.  Changing
+# this does not invalidate them -- both sides of a duel are always judged by
+# the same rule -- but a match run now is not bit-identical to one run then.
+resign_score   = 400
 
 # ---------------------------------------------------------- our own builds
 # Frozen copies of the engine, used to test a source change against the build
@@ -264,6 +274,20 @@ perft_command = "perft"
 bench_command = "bench"
 options = { Hash = 64, Threads = 1, EvalMode = "hce" }
 note    = "unrated: the candidate build"
+
+# The same binary with the previous network.  `ce` loads net3.bin (king
+# buckets), this loads net2.bin, and nothing else differs -- same search, same
+# options -- so a duel between them measures the network and only the network,
+# speed included.  That last part matters: at a fixed node count a slower net
+# is not charged for being slower, which is how a 1536-wide version of this
+# came to look like +33.8 Elo and play like -2.7.
+[[opponent]]
+name    = "ce-net2"
+command = "engine/ce.exe --net net2.bin"
+perft_command = "perft"
+bench_command = "bench"
+options = { Hash = 64, Threads = 1, EvalMode = "blend" }
+note    = "unrated: the single-bucket network net3 replaced"
 
 # A snapshot of the build under test, so that editing and rebuilding the engine
 # cannot disturb a match that is already running.

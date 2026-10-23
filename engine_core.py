@@ -31,9 +31,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.join(HERE, "engine")
 LIB_NAME = "ce.dll" if sys.platform == "win32" else "libce.so"
 LIB_PATH = os.path.join(ENGINE_DIR, LIB_NAME)
-# The perspective network built by nnue/.  The old single-perspective
-# 769-256-1 net.bin is no longer a format the engine reads.
-NET_PATH = os.path.join(ENGINE_DIR, "net2.bin")
+# The perspective network built by nnue/.  net3.bin is the king-bucket one;
+# net2.bin is its predecessor and still loads, since the engine reads both
+# formats.  The old single-perspective 769-256-1 net.bin does not.
+NET_PATH = os.path.join(ENGINE_DIR, "net3.bin")
+if not os.path.isfile(NET_PATH):
+    NET_PATH = os.path.join(ENGINE_DIR, "net2.bin")
 
 C_SOURCES = ["bitboard.c", "position.c", "movegen.c", "eval.c", "nnue.c",
              "tt.c", "tune.c", "search.c", "api.c", "uci.c", "ce.h", "tune.h"]

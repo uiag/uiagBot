@@ -4,8 +4,27 @@ A perspective NNUE for the engine in [`../engine`](../engine/README.md), with
 the data pipeline that trains it.
 
 ```
-(768 -> 1024) x 2  ->  1        SCReLU, 8 output buckets by piece count
+(4 x 768 -> 1024) x 2  ->  1    SCReLU, 8 output buckets by piece count,
+                                4 king buckets, files folded onto a-d
 ```
+
+## King buckets
+
+Each king region gets its own copy of the 768 planes, and the board is folded
+onto files a-d by the perspective's own king file. `arch.py` holds the map and
+the measurement behind it; `engine/nnue.c` holds a copy of the same table, and
+the two have to agree exactly or the engine evaluates a different network from
+the one that was trained.
+
+Worth **+20.8 +/- 11.4 Elo at 10+0.1**. Widening L1 to 1536 at the same time
+was tried and rejected: it is a much better evaluator (+33.8 at a fixed node
+count against +18.5) and loses on a clock (-2.7), because the extra width
+costs 25% of the speed. The engine's README has the table.
+
+Because a king move can change its own side's bucket or fold, that half of the
+accumulator is rebuilt when it does and the other half still updates by
+difference. That asymmetry is the easiest thing here to get wrong and is what
+the three king-walk positions in `verify.py` are for.
 
 ## Why not the old one
 
@@ -29,9 +48,19 @@ ones:
   There are now eight, chosen by piece count.
 
 The accumulator is also updated by difference rather than recomputed, which is
-what makes a 1024-wide first layer affordable at all: the network costs 26% of
-the engine's speed (1.16 M nps against 1.57 M), where a full refresh at every
-node would cost several times that.
+what makes a 1024-wide first layer affordable at all: a full refresh at every
+node would cost several times what it does.
+
+Updating by difference is not the whole story, though, and the part that was
+missing turned out to be most of the cost. The chain breaks whenever the
+position one ply up was never evaluated — which the search arranges constantly,
+because a node that takes its static evaluation from the transposition table
+never computes an accumulator — and 46% of all evaluations were therefore
+rebuilding both halves from scratch. Each view now caches the last accumulator
+built in it and the board it belongs to, so a rebuild pays only for the squares
+that differ: 4.6 feature rows instead of 22.6, and **+31.7% nodes per second**
+at identical node counts. The engine's README has the numbers; `verify.py`
+checks the cache against a build that does not use one.
 
 ## The data
 

@@ -1103,13 +1103,24 @@ static int scale_factor(const Position *pos, int strongSide, int eg) {
 
     if (known_endgame(pos, strongSide, &sf)) return sf;
 
-    /* opposite coloured bishops and nothing else */
-    if (npmS == PieceValueMg[BISHOP] && npmW == PieceValueMg[BISHOP]
-        && popcount(pieces_cp(pos, WHITE, BISHOP)) == 1
+    int oppositeBishops =
+        popcount(pieces_cp(pos, WHITE, BISHOP)) == 1
         && popcount(pieces_cp(pos, BLACK, BISHOP)) == 1
         && ((pieces_cp(pos, WHITE, BISHOP) & DarkSquares) != 0)
-           != ((pieces_cp(pos, BLACK, BISHOP) & DarkSquares) != 0)) {
+           != ((pieces_cp(pos, BLACK, BISHOP) & DarkSquares) != 0);
+
+    /* opposite coloured bishops and nothing else */
+    if (npmS == PieceValueMg[BISHOP] && npmW == PieceValueMg[BISHOP]
+        && oppositeBishops) {
         sf = pawnsS <= 1 ? 22 : 22 + 3 * popcount(pos->byType[PAWN]);
+    } else if (ScaleEndgames && oppositeBishops) {
+        /* Opposite bishops with the heavy pieces still on.  Much less drawish
+         * than the pure ending -- the rooks and queens give the attacker a
+         * second front the bishop cannot cover -- but still drawish, and the
+         * old code scaled it at 64 because it only recognised the bare case.
+         * Stockfish 11's form: 22 plus a few per piece left on the board. */
+        sf = 22 + ScaleOppBishopPc * popcount(pos->byColor[strongSide]);
+        if (sf > 64) sf = 64;
     } else if (!pawnsS && npmS - npmW <= PieceValueMg[BISHOP]) {
         sf = npmS < PieceValueMg[ROOK] ? 0
            : (npmW <= PieceValueMg[BISHOP] ? 4 : 14);
@@ -1119,14 +1130,37 @@ static int scale_factor(const Position *pos, int strongSide, int eg) {
         sf = 37 + 7 * pawnsS;
     }
 
+    U64 strongPawns = pieces_cp(pos, strongSide, PAWN);
+
+    if (ScaleEndgames) {
+        int absEg = eg < 0 ? -eg : eg;
+        int weakKsq = lsb(pieces_cp(pos, weakSide, KING));
+
+        /* A defending king that stands in front of everything the strong side
+         * has left.  The old form of this only fired when the defender had no
+         * pawns at all, which is the rarer half of it; what actually decides
+         * these endings is whether the king is past the pawns, not whether it
+         * has any of its own.  Stockfish 11's condition. */
+        if (sf == 64 && absEg <= PieceValueEg[BISHOP] && pawnsS <= 2
+            && !(strongPawns & PassedPawnSpan[weakSide][weakKsq]))
+            sf = ScaleKingInFront + 7 * pawnsS;
+
+        /* Rook endings a pawn up are the most common drawn-but-better ending
+         * there is, and nothing here knew it: one rook each, no other pieces,
+         * and a single extra pawn converts far less than the material says. */
+        if (npmS == PieceValueMg[ROOK] && npmW == PieceValueMg[ROOK]
+            && popcount(strongPawns) - popcount(pieces_cp(pos, weakSide, PAWN)) == 1
+            && popcount(pos->byType[PAWN]) <= 6
+            && sf > ScaleRookEnding)
+            sf = ScaleRookEnding;
+    }
+
     /* Pawns on one flank only are much harder to convert: the defender has a
      * single front to hold and the attacking king has nowhere to break in. */
-    U64 strongPawns = pieces_cp(pos, strongSide, PAWN);
     if (sf > 48 && strongPawns && npmS - npmW <= PieceValueMg[ROOK]
         && (!(strongPawns & QueenSideBB) || !(strongPawns & KingSideBB)))
         sf = sf * 7 / 8;
 
-    (void)eg;
     return sf;
 }
 
@@ -1402,6 +1436,20 @@ int eval_hce(const Position *pos) {
     return eval_hce_window(pos, -VALUE_INFINITE, VALUE_INFINITE);
 }
 
+/*
+ * The fifty-move damping, for the network.
+ *
+ * taper() has always applied this to the hand-crafted score: a position whose
+ * halfmove clock is nearly out is worth less than the pieces say, because the
+ * draw is closer than the win.  The network never saw it -- `nnue` reported
+ * the same number at halfmove 98 as at 0, and `blend` damped only the
+ * hand-crafted share -- so the search had no way to notice a game drifting
+ * into the fifty-move rule.  NnueFiftyDamp = 0 restores that.
+ */
+static inline int nnue_fifty(const Position *pos, int v) {
+    return NnueFiftyDamp ? v * (200 - pos->halfmove) / 200 : v;
+}
+
 int eval_position_window(Position *pos, int alpha, int beta) {
     int v;
     if (pos_insufficient_material(pos)) return VALUE_DRAW;
@@ -1413,7 +1461,7 @@ int eval_position_window(Position *pos, int alpha, int beta) {
     }
 
     if (g_evalMode == EVAL_NNUE && nnue_available()) {
-        v = nnue_evaluate(pos);
+        v = nnue_fifty(pos, nnue_evaluate(pos));
     } else if (g_evalMode == EVAL_BLEND && nnue_available()) {
         /* A mixture of the two, weighted by BlendNnueWeight out of 128.  It
          * used to be fixed at 1:3 towards the hand-crafted evaluation, which
@@ -1421,7 +1469,7 @@ int eval_position_window(Position *pos, int alpha, int beta) {
          * 21-3; the perspective network is now the better of the two and the
          * old weighting had it backwards. */
         int h = eval_hce(pos);
-        int n = nnue_evaluate(pos);
+        int n = nnue_fifty(pos, nnue_evaluate(pos));
         v = (n * BlendNnueWeight + h * (128 - BlendNnueWeight)) / 128;
     } else {
         v = eval_hce_window(pos, alpha, beta);

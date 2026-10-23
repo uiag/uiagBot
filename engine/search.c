@@ -39,6 +39,10 @@ static int ThreadsAllocated = 0;
 
 static SearchLimits Limits;
 static int64_t StartTime, OptimumTime, MaximumTime;
+/* The end-of-iteration time factor, kept from the last completed iteration so
+ * that the in-iteration soft check (TmSoftInIter) uses the same deadline the
+ * between-iterations check would have applied. */
+static double TimeFactor = 1.0;
 static int64_t LimitNodes;
 static int RootPly;
 static int RootSide;   /* the side to move at the root, for re-timing */
@@ -68,6 +72,10 @@ static int64_t elapsed(void) { return now_ms() - StartTime; }
 static void init_time(const SearchLimits *lim, int side, int ply) {
     StartTime = now_ms();
     LimitNodes = lim->nodes;
+    /* Belongs to this search, not the last one: the first iteration has no
+     * factor of its own yet, and inheriting the previous move's would apply a
+     * stale deadline to the one in front of us. */
+    TimeFactor = 1.0;
 
     if (lim->movetime > 0) {
         OptimumTime = MaximumTime = lim->movetime - MoveOverhead;
@@ -86,18 +94,23 @@ static void init_time(const SearchLimits *lim, int side, int ply) {
     if (timeLeft < 1) timeLeft = 1;
 
     double optScale, maxScale;
+    double maxCap = (double)TmMaxCap / 100.0;
     if (!lim->movestogo) {
-        double a = 0.0120 + pow((double)ply + 3.0, 0.45) * 0.0039;
-        double b = 0.2 * (double)time / (double)timeLeft;
+        double a = (double)TmOptBase / 10000.0
+                 + pow((double)ply + 3.0, (double)TmOptPlyExp / 100.0)
+                   * (double)TmOptPlyMult / 10000.0;
+        double b = (double)TmOptFrac / 1000.0 * (double)time / (double)timeLeft;
         optScale = a < b ? a : b;
-        maxScale = 3.0 + (double)ply / 14.0;
-        if (maxScale > 5.0) maxScale = 5.0;
+        maxScale = (double)TmMaxBase / 100.0 + (double)ply / (double)TmMaxPlyDiv;
+        if (maxScale > maxCap) maxScale = maxCap;
     } else {
-        double a = 0.88 / mtg;
-        double b = 0.88 * (double)time / (double)timeLeft;
+        double mtgOpt = (double)TmMtgOpt / 100.0;
+        double a = mtgOpt / mtg;
+        double b = mtgOpt * (double)time / (double)timeLeft;
         optScale = a < b ? a : b;
-        maxScale = 1.5 + 0.11 * mtg;
-        if (maxScale > 5.0) maxScale = 5.0;
+        maxScale = (double)TmMtgMaxBase / 100.0
+                 + (double)TmMtgMaxMult / 100.0 * mtg;
+        if (maxScale > maxCap) maxScale = maxCap;
     }
 
     OptimumTime = (int64_t)(optScale * (double)timeLeft);
@@ -106,7 +119,8 @@ static void init_time(const SearchLimits *lim, int side, int ply) {
     /* Never put more than this share of the remaining clock into one move.
      * Without it a single long iteration late in a fast game can leave too
      * little behind to answer the next move, which costs the game on time. */
-    int64_t cap = (int64_t)(0.45 * (double)(time - MoveOverhead));
+    int64_t cap = (int64_t)((double)TmClockCap / 100.0
+                            * (double)(time - MoveOverhead));
     if (cap < 1) cap = 1;
     if (MaximumTime > cap) MaximumTime = cap;
     if (OptimumTime > MaximumTime) OptimumTime = MaximumTime;
@@ -297,6 +311,7 @@ static void update_quiet_stats(Thread *th, SearchStack *ss, const Position *pos,
     int us = pos->side;
     int bonus = stat_bonus(depth);
     int pc = pos->board[move_from(best)];
+    int16_t *pawnHist = &th->pawnHist[pos->pawnKey & PAWN_HIST_MASK][0][0];
 
     if (ss->killers[0] != best) {
         ss->killers[1] = ss->killers[0];
@@ -304,6 +319,7 @@ static void update_quiet_stats(Thread *th, SearchStack *ss, const Position *pos,
     }
     hist_bump(&th->mainHist[us][move_from(best)][move_to(best)], bonus, HIST_MAX);
     update_cont_hist(ss, pc, move_to(best), bonus);
+    if (PawnHistWeight) hist_bump(&pawnHist[pc * 64 + move_to(best)], bonus, HIST_MAX);
 
     if ((ss - 1)->move != MOVE_NONE && (ss - 1)->move != MOVE_NULL) {
         int prevPc = (ss - 1)->movedPiece;
@@ -317,6 +333,7 @@ static void update_quiet_stats(Thread *th, SearchStack *ss, const Position *pos,
         int p = pos->board[move_from(m)];
         hist_bump(&th->mainHist[us][move_from(m)][move_to(m)], -bonus, HIST_MAX);
         update_cont_hist(ss, p, move_to(m), -bonus);
+        if (PawnHistWeight) hist_bump(&pawnHist[p * 64 + move_to(m)], -bonus, HIST_MAX);
     }
 }
 
@@ -424,8 +441,13 @@ static void score_noisy(MovePicker *mp) {
     for (int i = 0; i < mp->size; i++) {
         Move m = mp->moves[i];
         int pc = pos->board[move_from(m)];
-        int s = 8 * SeeValue[captured_type(pos, m)]
-              + mp->th->captHist[pc][move_to(m)][captured_type(pos, m)];
+        int victim = captured_type(pos, m);
+        /* The victim has to stay the senior term.  At CaptHistDiv = 1 it is
+         * not: 8 * SeeValue spans 800 to 7800 while the history is clamped to
+         * +/-10692, so a pawn capture that has been working sorts above a
+         * queen capture that has not been tried. */
+        int s = 8 * SeeValue[victim]
+              + mp->th->captHist[pc][move_to(m)][victim] / CaptHistDiv;
         if (move_type(m) == MT_PROMO)
             s += move_promo(m) == QUEEN ? 8 * SeeValue[QUEEN] : -8 * SeeValue[QUEEN];
         mp->scores[i] = s;
@@ -437,6 +459,7 @@ static void score_quiet(MovePicker *mp) {
     SearchStack *ss = mp->ss;
     Thread *th = mp->th;
     int us = pos->side;
+    const int16_t *pawnHist = &th->pawnHist[pos->pawnKey & PAWN_HIST_MASK][0][0];
     Move counter = MOVE_NONE;
     if ((ss - 1)->move != MOVE_NONE && (ss - 1)->move != MOVE_NULL
         && (ss - 1)->movedPiece != NO_PIECE)
@@ -450,6 +473,7 @@ static void score_quiet(MovePicker *mp) {
               + 2 * (ss - 1)->contHist[pc * 64 + to]
               +     (ss - 2)->contHist[pc * 64 + to]
               +     (ss - 4)->contHist[pc * 64 + to] / 2;
+        if (PawnHistWeight) s += pawnHist[pc * 64 + to] * PawnHistWeight / 128;
         if (m == ss->killers[0]) s += 1 << 21;
         else if (m == ss->killers[1]) s += 1 << 20;
         else if (m == counter) s += 1 << 19;
@@ -899,7 +923,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
      * wide to ever fire at depth 1 and too narrow to be safe at depth 6; the
      * quadratic form is the one that matches how much a quiet move can
      * plausibly be worth. */
-    if (!pvNode && !excluded && depth <= 6
+    if (!pvNode && !excluded && depth <= RazorMaxDepth
         && eval + RazorBase + RazorMult * depth * depth < alpha) {
         int v = qsearch(th, ss, alpha - 1, alpha, 0);
         if (v < alpha) return v;
@@ -908,7 +932,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
     /* null move pruning */
     if (!pvNode && !excluded
         && (ss - 1)->move != MOVE_NULL
-        && depth >= 3
+        && depth >= NmpMinDepth
         && eval >= beta
         && ss->staticEval >= beta - NmpMarginDepth * depth + NmpMargin
         && pos_non_pawn_pieces(pos, us) > 0
@@ -929,7 +953,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
 
         if (nullScore >= beta) {
             if (nullScore >= VALUE_MATE_IN_MAX_PLY) nullScore = beta;
-            if (th->nmpMinPly || depth < 14) return nullScore;
+            if (th->nmpMinPly || depth < NmpVerifyDepth) return nullScore;
 
             /* verification search at high depth */
             th->nmpMinPly = ply + 3 * (depth - R) / 4;
@@ -940,7 +964,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
     }
 
     /* ProbCut */
-    if (!pvNode && depth > 4 && !excluded
+    if (!pvNode && depth >= ProbcutMinDepth && !excluded
         && beta > VALUE_MATED_IN_MAX_PLY && beta < VALUE_TB_WIN) {
         int probcutBeta = beta + ProbcutMargin - ProbcutImproving * improving;
         if (!(found && ttDepth >= depth - 3 && ttScore != VALUE_NONE
@@ -959,7 +983,7 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
                 int v = -qsearch(th, ss + 1, -probcutBeta, -probcutBeta + 1, 0);
                 if (v >= probcutBeta)
                     v = -search_node(th, ss + 1, -probcutBeta, -probcutBeta + 1,
-                                     depth - 4, !cutNode, 0);
+                                     depth - ProbcutReduction, !cutNode, 0);
                 pos_undo_move(pos, m);
 
                 if (g_stop) return VALUE_DRAW;
@@ -973,8 +997,8 @@ static int search_node(Thread *th, SearchStack *ss, int alpha, int beta, int dep
     }
 
     /* internal iterative reduction */
-    if (pvNode && depth >= 3 && ttMove == MOVE_NONE) depth -= 2;
-    if (cutNode && depth >= 8 && ttMove == MOVE_NONE) depth -= 1;
+    if (pvNode && depth >= IirPvDepth && ttMove == MOVE_NONE) depth -= 2;
+    if (cutNode && depth >= IirCutDepth && ttMove == MOVE_NONE) depth -= 1;
     if (depth <= 0) return qsearch(th, ss, alpha, beta, 0);
 
 moves_loop:;
@@ -1005,14 +1029,23 @@ moves_loop:;
         int capture = pos_is_capture(pos, m);
         int givesCheck = pos_gives_check(pos, m);
         int movedPiece = pos->board[move_from(m)];
+        /* Read off the board while the board still describes the position
+         * before the move: once pos_do_move has run, board[to] holds the
+         * piece that arrived, not the one it took. */
+        int capturedPt = capture ? captured_type(pos, m) : PAWN;
         int newDepth = depth - 1;
         int extension = 0;
 
         int hist = 0;
-        if (!capture)
+        if (!capture) {
             hist = th->mainHist[us][move_from(m)][move_to(m)]
                  + (ss - 1)->contHist[movedPiece * 64 + move_to(m)]
                  + (ss - 2)->contHist[movedPiece * 64 + move_to(m)];
+            if (PawnHistWeight)
+                hist += th->pawnHist[pos->pawnKey & PAWN_HIST_MASK]
+                                    [movedPiece][move_to(m)]
+                        * PawnHistWeight / 128;
+        }
 
         /* ---- shallow pruning ---- */
         if (!rootNode && bestScore > VALUE_MATED_IN_MAX_PLY
@@ -1046,6 +1079,19 @@ moves_loop:;
                 if (!pos_see_ge(pos, m, -SeePruneQuiet * lmrDepth * lmrDepth))
                     continue;
             } else {
+                /* Futility pruning of captures.  The quiet version has been
+                 * here for a while; this is the same bet with the captured
+                 * piece added to what the move could possibly be worth.  A
+                 * check is exempt because it forces a reply, and a promotion
+                 * because the piece it makes is not in SeeValue[captured]. */
+                if (FutilityCaptBase && !givesCheck && !ss->inCheck
+                    && move_type(m) != MT_PROMO
+                    && lmrDepth < FutilityCaptDepth
+                    && ss->staticEval + FutilityCaptBase
+                       + FutilityCaptMult * lmrDepth
+                       + SeeValue[capturedPt] <= alpha)
+                    continue;
+
                 /* SEE pruning of captures */
                 if (!pos_see_ge(pos, m, -SeePruneNoisy * depth))
                     continue;
@@ -1148,8 +1194,11 @@ moves_loop:;
             } else if (LmrCaptHistDiv) {
                 /* Captures were reduced by position in the move list alone,
                  * with no account of how the same capture has fared
-                 * elsewhere in this search. */
-                int h = th->captHist[movedPiece][move_to(m)][captured_type(pos, m)]
+                 * elsewhere in this search.  `capturedPt` was taken before
+                 * the move was made; reading it here would name the piece
+                 * that arrived on the square instead of the one it took, and
+                 * index a bucket belonging to some other capture entirely. */
+                int h = th->captHist[movedPiece][move_to(m)][capturedPt]
                       * 1024 / LmrCaptHistDiv;
                 if (h > LmrHistMax) h = LmrHistMax;
                 if (h < -LmrHistMax) h = -LmrHistMax;
@@ -1160,9 +1209,14 @@ moves_loop:;
             if (!improving) r++;
             if (cutNode) r += 2;
             if (ttPv) r--;
-            if (givesCheck) r--;
+            /* `pos` is the position *after* the move here, so the second of
+             * these used to be spelled `pos->checkers` -- the same condition
+             * as givesCheck, applied twice, for two plies of relief where the
+             * code read as one.  Both are now named and tunable: the default
+             * reproduces the old behaviour exactly. */
+            r -= LmrGivesCheck * (givesCheck != 0);
+            r -= LmrInCheck * (ss->inCheck != 0);
             if (ttCapture && !capture) r++;
-            if (pos->checkers) r--;
             if (mp.stage == ST_BAD_NOISY) r++;
             /* a node whose children keep failing high is not worth a full look */
             if ((ss + 1)->cutoffCnt > LmrCutoffCnt) r++;
@@ -1220,6 +1274,29 @@ moves_loop:;
                     rm->score = -VALUE_INFINITE;
                 }
             }
+
+            /*
+             * The soft limit, inside the iteration.
+             *
+             * Between iterations the search compares against
+             * OptimumTime * factor; inside one, only MaximumTime applies, and
+             * that is three to five times OptimumTime.  So an iteration that
+             * turns out to be long overshoots the soft target by up to that
+             * much, and on a bullet clock that is the difference between
+             * banking the time and not having it for the next move.
+             *
+             * Checked here rather than in check_time because a root move
+             * boundary is the one place where stopping is cheap: the move just
+             * searched has its score recorded above, so the iteration has a
+             * fresh opinion about the move that would actually be played.
+             * Never at depth 1, which has to finish.
+             */
+            if (TmSoftInIter && th->id == 0 && th->rootDepth > 1
+                && Limits.depth == 0 && Limits.nodes == 0 && !Limits.infinite
+                && OptimumTime > 0
+                && (double)elapsed() > (double)OptimumTime * TimeFactor
+                                       * (double)TmSoftInIter / 100.0)
+                g_stop = 1;
         }
 
         if (score > bestScore) {
@@ -1370,6 +1447,13 @@ static void thread_search(Thread *th) {
             int prev = th->rootMoves[th->pvIdx].avgScore;
             int delta = AspInitDelta + (prev > -VALUE_INFINITE
                                         ? prev * prev / AspScoreDiv : 0);
+            /* Lazy SMP: every thread searching every depth with the same
+             * window leaves the shared table as the only thing making them
+             * diverge.  Widening the helpers' windows by different amounts
+             * gives them different re-search patterns and so different trees,
+             * at no cost to the main thread, which keeps its own window. */
+            if (SmpJitter && th->id)
+                delta += delta * ((th->id * 7) % (SmpJitter + 1)) / 16;
             int alpha = -VALUE_INFINITE, beta = VALUE_INFINITE;
             if (depth >= 4 && prev > -VALUE_INFINITE && prev < VALUE_INFINITE) {
                 alpha = prev - delta < -VALUE_INFINITE ? -VALUE_INFINITE : prev - delta;
@@ -1426,24 +1510,29 @@ static void thread_search(Thread *th) {
             && OptimumTime > 0) {
 
             double factor = 1.0;
-            factor *= 1.22 - 0.06 * (stability < 8 ? stability : 8);
+            factor *= (double)TmStabBase / 100.0
+                    - (double)TmStabStep / 100.0
+                      * (stability < TmStabMax ? stability : TmStabMax);
             if (lastBestScore > -VALUE_INFINITE) {
                 int diff = lastBestScore - score;
-                if (diff > 40) factor *= 1.15;
-                if (diff > 120) factor *= 1.25;
-                if (diff < -60) factor *= 0.92;
+                if (diff > TmDropMargin1) factor *= (double)TmDropMult1 / 100.0;
+                if (diff > TmDropMargin2) factor *= (double)TmDropMult2 / 100.0;
+                if (diff < -TmRiseMargin) factor *= (double)TmRiseMult / 100.0;
             }
-            if (th->rootMoveCount == 1) factor *= 0.35;
+            if (th->rootMoveCount == 1) factor *= (double)TmSingleMove / 100.0;
 
             /* If nearly the whole tree went into the move we are about to
              * play, there is little left to find out; if it went elsewhere,
              * the root is still unsettled and deserves longer. */
             if (th->nodes > 0) {
                 double effort = (double)th->rootMoves[0].effort / (double)th->nodes;
-                factor *= (double)TimeNodeEffort / 100.0 - 0.45 * effort;
-                if (factor < 0.2) factor = 0.2;
+                factor *= (double)TimeNodeEffort / 100.0
+                        - (double)TmEffortMult / 100.0 * effort;
+                double floor = (double)TmFactorMin / 100.0;
+                if (factor < floor) factor = floor;
             }
 
+            TimeFactor = factor;
             if ((double)elapsed() > (double)OptimumTime * factor) g_stop = 1;
 
             /* A mate the finished iteration actually resolved is enough: it
@@ -1474,17 +1563,122 @@ static void thread_search(Thread *th) {
 /* threads                                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * The helper threads are a pool, woken for each search rather than created
+ * for it.
+ *
+ * They used to be created and joined on every move.  What that costs is not
+ * the thread object, it is the thread-local storage each one carries: the
+ * pawn hash is 1 MB and the network's accumulator stack another 0.6, and
+ * Windows commits and zeroes all of it the first time the thread touches it.
+ * A six-thread search therefore paid for about eight megabytes of zeroing
+ * before it could start, on every move, and threw away a warm pawn hash each
+ * time it finished.
+ *
+ * Keeping the threads alive is safe without any further bookkeeping because
+ * both of those tables are already self-validating: every accumulator entry
+ * carries the zobrist key of the position it belongs to and is rebuilt if it
+ * does not match, and a pawn hash entry is by construction a function of the
+ * pawn placement alone.  Neither can carry anything stale into a new search;
+ * the worst a leftover entry can do is be ignored.
+ */
+static int PoolSearching[MAX_THREADS];
+static int PoolExit = 0;
+static int PoolLive = 0;              /* helper threads that exist */
+
+#ifdef _WIN32
+static CRITICAL_SECTION PoolLock;
+static CONDITION_VARIABLE PoolGo, PoolDone;
+static HANDLE PoolHandles[MAX_THREADS];
+#define POOL_LOCK()     EnterCriticalSection(&PoolLock)
+#define POOL_UNLOCK()   LeaveCriticalSection(&PoolLock)
+#define POOL_WAIT(cv)   SleepConditionVariableCS(&(cv), &PoolLock, INFINITE)
+#define POOL_WAKE(cv)   WakeAllConditionVariable(&(cv))
+#else
+static pthread_mutex_t PoolLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t PoolGo = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t PoolDone = PTHREAD_COND_INITIALIZER;
+static pthread_t PoolHandles[MAX_THREADS];
+#define POOL_LOCK()     pthread_mutex_lock(&PoolLock)
+#define POOL_UNLOCK()   pthread_mutex_unlock(&PoolLock)
+#define POOL_WAIT(cv)   pthread_cond_wait(&(cv), &PoolLock)
+#define POOL_WAKE(cv)   pthread_cond_broadcast(&(cv))
+#endif
+
+static void pool_worker(int id) {
+    POOL_LOCK();
+    for (;;) {
+        while (!PoolSearching[id] && !PoolExit) POOL_WAIT(PoolGo);
+        if (PoolExit) break;
+        POOL_UNLOCK();
+
+        thread_search(Threads[id]);
+
+        POOL_LOCK();
+        PoolSearching[id] = 0;
+        POOL_WAKE(PoolDone);
+    }
+    POOL_UNLOCK();
+}
+
 #ifdef _WIN32
 static DWORD WINAPI thread_entry(LPVOID arg) {
-    thread_search((Thread *)arg);
+    pool_worker((int)(intptr_t)arg);
     return 0;
 }
 #else
 static void *thread_entry(void *arg) {
-    thread_search((Thread *)arg);
+    pool_worker((int)(intptr_t)arg);
     return NULL;
 }
 #endif
+
+/* Bring the pool up to `n` helpers (ids 1 .. n-1; id 0 is the caller). */
+static void pool_ensure(int n) {
+#ifdef _WIN32
+    static int lockReady = 0;
+    if (!lockReady) {
+        InitializeCriticalSection(&PoolLock);
+        InitializeConditionVariable(&PoolGo);
+        InitializeConditionVariable(&PoolDone);
+        lockReady = 1;
+    }
+#endif
+    for (int i = PoolLive + 1; i < n; i++) {
+        PoolSearching[i] = 0;
+#ifdef _WIN32
+        PoolHandles[i] = CreateThread(NULL, 0, thread_entry,
+                                      (LPVOID)(intptr_t)i, 0, NULL);
+        if (!PoolHandles[i]) break;
+#else
+        if (pthread_create(&PoolHandles[i], NULL, thread_entry,
+                           (void *)(intptr_t)i))
+            break;
+#endif
+        PoolLive = i;
+    }
+}
+
+/* Hand the pool a search and wait for every helper to finish it. */
+static void pool_run(int n) {
+    if (n <= 1) return;
+    POOL_LOCK();
+    for (int i = 1; i < n && i <= PoolLive; i++) PoolSearching[i] = 1;
+    POOL_WAKE(PoolGo);
+    POOL_UNLOCK();
+}
+
+static void pool_join(int n) {
+    if (n <= 1) return;
+    POOL_LOCK();
+    for (;;) {
+        int busy = 0;
+        for (int i = 1; i < n && i <= PoolLive; i++) busy |= PoolSearching[i];
+        if (!busy) break;
+        POOL_WAIT(PoolDone);
+    }
+    POOL_UNLOCK();
+}
 
 void search_setup_threads(int n) {
     if (n < 1) n = 1;
@@ -1506,6 +1700,7 @@ void search_new_game(void) {
         memset(Threads[i]->captHist, 0, sizeof(Threads[i]->captHist));
         memset(Threads[i]->contHist, 0, sizeof(Threads[i]->contHist));
         memset(Threads[i]->counterMove, 0, sizeof(Threads[i]->counterMove));
+        memset(Threads[i]->pawnHist, 0, sizeof(Threads[i]->pawnHist));
         memset(Threads[i]->pawnCorrHist, 0, sizeof(Threads[i]->pawnCorrHist));
         memset(Threads[i]->minorCorrHist, 0, sizeof(Threads[i]->minorCorrHist));
         memset(Threads[i]->majorCorrHist, 0, sizeof(Threads[i]->majorCorrHist));
@@ -1558,15 +1753,8 @@ void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *r
         }
     }
 
-#ifdef _WIN32
-    HANDLE handles[MAX_THREADS];
-    for (int i = 1; i < g_threadCount; i++)
-        handles[i] = CreateThread(NULL, 0, thread_entry, Threads[i], 0, NULL);
-#else
-    pthread_t handles[MAX_THREADS];
-    for (int i = 1; i < g_threadCount; i++)
-        pthread_create(&handles[i], NULL, thread_entry, Threads[i]);
-#endif
+    pool_ensure(g_threadCount);
+    pool_run(g_threadCount);
 
 #ifdef CE_TIME_DEBUG
     DbgChecks = DbgStopSetAt = DbgLastIterEnd = 0;
@@ -1581,14 +1769,7 @@ void search_go(const Position *rootPos, const SearchLimits *lim, SearchResult *r
                 (long long)DbgLastIterEnd, (long long)Threads[0]->nodes);
 #endif
     g_stop = 1;
-
-    for (int i = 1; i < g_threadCount; i++) {
-#ifdef _WIN32
-        if (handles[i]) { WaitForSingleObject(handles[i], INFINITE); CloseHandle(handles[i]); }
-#else
-        pthread_join(handles[i], NULL);
-#endif
-    }
+    pool_join(g_threadCount);
 
     /*
      * Pick the move the threads agree on rather than the one found by

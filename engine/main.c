@@ -14,10 +14,12 @@ extern int ce_set_position(const char *fen, const char *moves);
 extern unsigned long long ce_perft(int depth);
 
 int main(int argc, char **argv) {
-    /* net2.bin is the perspective network; the old 769-256-1 net.bin is not
-     * loadable any more and was weaker than the hand-crafted evaluation
-     * anyway. */
-    const char *net = "net2.bin";
+    /* net3.bin is the king-bucket perspective network.  net2.bin is the
+     * single-bucket one it replaced and still loads -- the engine reads both
+     * formats -- which is what `--net net2.bin` is for.  The old 769-256-1
+     * net.bin is not loadable any more and was weaker than the hand-crafted
+     * evaluation anyway. */
+    const char *net = "net3.bin";
     int hash = 64, threads = 1;
     int doBench = 0, doPerft = 0, argDepth = 0;
 

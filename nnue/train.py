@@ -32,7 +32,7 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from arch import L1, OUTPUT_BUCKETS, SCALE, NnueNet          # noqa: E402
+from arch import KING_BUCKETS, L1, OUTPUT_BUCKETS, SCALE, NnueNet   # noqa: E402
 from data import Batches, load_shards                        # noqa: E402
 
 
@@ -81,8 +81,8 @@ def main() -> int:
         net.load_state_dict(torch.load(args.resume, map_location=device))
         print(f"resumed from {args.resume}")
     params = sum(p.numel() for p in net.parameters())
-    print(f"net (768 -> {args.l1}) x2 -> 1, {args.buckets} buckets, "
-          f"{params / 1e6:.2f}M parameters")
+    print(f"net ({KING_BUCKETS} x 768 -> {args.l1}) x2 -> 1, "
+          f"{args.buckets} output buckets, {params / 1e6:.2f}M parameters")
 
     opt = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=args.wd)
     per_epoch = (args.limit or len(train)) // args.batch

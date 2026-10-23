@@ -37,11 +37,6 @@ void tune_init(void) {
 
 const TuneParam *tune_params(void) { return Params; }
 
-int tune_count(void) {
-    int n = 0;
-    while (Params[n].name) n++;
-    return n;
-}
 
 static int ieq(const char *a, const char *b) {
     for (; *a && *b; a++, b++) {
