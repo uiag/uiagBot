@@ -1,44 +1,49 @@
 # Submitting uiagBot 1.3 to CCRL
 
-Build the package first:
+**Everything is published and the post below is ready to send.** Both links in
+it are live and were checked from an unauthenticated client:
 
-```
-python ccrl/build.py
-```
+* Repository — <https://github.com/uiag/uiagBot> (public)
+* Release v1.3 — <https://github.com/uiag/uiagBot/releases/tag/v1.3>
+  (`uiagBot-1.3.zip`, both executables, and `SHA256SUMS.txt`)
 
-which writes `ccrl/dist/uiagBot-1.3.zip` and the two executables inside it.
+Rebuild the package any time with `python ccrl/build.py`; the build is
+reproducible, so it reproduces the exact bytes that are in the release.
 
 ---
 
-## Before you post: three things only you can do
+## One thing still open: the VirusTotal link
 
-1. **Put your full name in.** `ENGINE_AUTHOR` at the top of `ccrl/build.py`
-   says just `Jakob`. That string is what the engine reports as `id author`
-   and what CCRL prints on the rating list, and the forum has "a preference
-   for real names rather than aliases". Set it, rebuild, then fix the post
-   below to match.
-2. **Publish the download.** CCRL will not chase a binary — the post needs a
-   URL they can fetch. Tag the commit and attach `uiagBot-1.3.zip` to a GitHub
-   release. A release is better than a link into the tree: CCRL and the
-   engine-list sites archive the URL, and a tag does not move under them.
-3. **Re-scan the exe on VirusTotal.** You already scanned one — the hash in
-   that report was `d8f50d20…`, which was the right file at the time. The
-   build has since been made **reproducible** (`-Wl,--no-insert-timestamp`,
-   because MinGW was stamping the build time into the PE header and every
-   rebuild therefore had a different hash), so the binary changed one last
-   time. The file in `ccrl/dist/` is now
-   `30d8074907909daaeb3b497466d6cf48352fe61e23f45793a489d58834b12853`
-   and will stay that hash for these sources.
+You scanned an earlier build — the report you linked was for hash
+`d8f50d20…`, which was the right file when you uploaded it. The build has
+since been made **reproducible**: MinGW was stamping the build time into the
+PE header, so every rebuild of identical sources produced a different file and
+a different hash, which would have made the scan report and the published
+checksums meaningless after any rebuild. `-Wl,--no-insert-timestamp` fixed
+that, and the binary changed one last time in the process.
 
-   So: upload `ccrl/dist/uiagBot-1.3/uiagBot-1.3-avx2.exe` to
-   <https://www.virustotal.com/> once more and paste the new link into the
-   post. Worth doing — there is a standing *WARNING: Executables!!!* thread on
-   the CCRL board asking people to be careful with binaries from strangers,
-   and heuristic antivirus does flag unknown statically-linked engines. It
-   removes the one reason a tester might skip you.
+The released AVX2 executable is now, permanently for these sources:
 
-   `SHA256SUMS.txt` in the zip and the release notes carry both hashes, so a
-   tester can confirm the download matches what was scanned.
+```
+30d8074907909daaeb3b497466d6cf48352fe61e23f45793a489d58834b12853  uiagBot-1.3-avx2.exe
+f618c882d1edd44dfb4afa51e4ae4bfb563d7a7c18b74a6d0e4bb90e67a92b59  uiagBot-1.3-popcnt.exe
+```
+
+So upload it once more — either the local
+`ccrl/dist/uiagBot-1.3/uiagBot-1.3-avx2.exe` or the released copy at
+<https://github.com/uiag/uiagBot/releases/download/v1.3/uiagBot-1.3-avx2.exe>
+— to <https://www.virustotal.com/>, and paste the new link over the
+placeholder in the post.
+
+Worth the two minutes: there is a standing *WARNING: Executables!!!* thread on
+the CCRL board asking people to be careful with binaries from strangers, and
+heuristic antivirus does flag unknown statically-linked engines. It removes
+the one reason a tester might skip you. `SHA256SUMS.txt` ships in the zip and
+the hashes are in the release notes, so a tester can confirm their download is
+the file that was scanned.
+
+If you would rather not bother, delete the VirusTotal line from the post — the
+SHA-256 lines stand on their own.
 
 ## Where to post it
 
@@ -80,7 +85,8 @@ Subject line, following the house style:
 
 > **uiagBot 1.3 — new UCI engine with its own NNUE, requesting CCRL testing**
 
-Body — fill in the three `<...>` placeholders:
+Body — copy as is. The only placeholder left is the VirusTotal link (or
+delete that line):
 
 ---
 
@@ -95,9 +101,9 @@ trained from scratch as well.
 * Country: Germany
 * Protocol: UCI
 * License: GNU AGPL v3
-* Repository: `<YOUR GITHUB URL>`
-* Releases / downloads: `<YOUR GITHUB RELEASE URL>`
-* VirusTotal: `<RE-SCAN NEEDED -- see the note below>`
+* Repository: https://github.com/uiag/uiagBot
+* Releases / downloads: https://github.com/uiag/uiagBot/releases/tag/v1.3
+* VirusTotal: `<PASTE THE NEW SCAN LINK HERE -- see the note at the top>`
 * SHA-256:
   * `uiagBot-1.3-avx2.exe` — `30d8074907909daaeb3b497466d6cf48352fe61e23f45793a489d58834b12853`
   * `uiagBot-1.3-popcnt.exe` — `f618c882d1edd44dfb4afa51e4ae4bfb563d7a7c18b74a6d0e4bb90e67a92b59`
