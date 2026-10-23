@@ -53,21 +53,6 @@ under `third_party/` is somebody else's; everything outside it is mine.
 
 Full attribution, versions and licence terms: [`THIRD-PARTY.md`](THIRD-PARTY.md).
 
-### Why `lichess-bot.py` is at the top level
-
-lichess-bot expects the bot author to supply two modules — the engine class it
-drives and whatever that class needs — and to import them as top-level
-modules, while the author in turn imports from `lib.`. The dependency runs
-both ways, so the shim at the root puts both `third_party/lichess-bot/` and
-the repository root on `sys.path` and then hands over. That keeps the start
-command unchanged and `lib/` where it belongs, under `third_party/`.
-
-The one edit made to upstream code is marked in place: the version file is
-read relative to its own module rather than to the working directory, because
-it no longer sits one level under the directory the bot is started from.
-
----
-
 ## Running the bot
 
 ```
